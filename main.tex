@@ -1,0 +1,118 @@
+\PassOptionsToPackage{svgnames,dvipsnames}{xcolor}
+
+\documentclass[12pt]{cmuthesis}
+
+\usepackage[Lenny]{fncychap}
+\ChNameVar{\Large}
+
+\input{packages}
+\input{macros}
+
+% \draftstamp{\today}{DRAFT}
+
+\begin {document}
+\frontmatter
+
+\pagestyle{empty}
+
+\title{{\bf Provably Efficient Planning
+    using Inaccurate Models by Learning from Experience}}
+\author{Anirudh Vemula}
+\date{Oct 2020}
+\Year{2020}
+%\trnumber{CMU-CS-19-109}
+
+\committee{  
+  \begin{tabular}{rl}
+    & \\
+Maxim Likhachev, Co-chair & \\
+J. Andrew Bagnell, Co-chair & 
+\end{tabular}
+}
+
+\support{}
+\disclaimer{}
+
+\keywords{}
+
+\maketitle
+
+% \begin{dedication}
+%   To all of the people that light up my life. {\ensuremath\heartsuit}
+% \end{dedication}
+
+\begin{abstract}
+  Modern planning methods are effective in computing feasible and
+optimal plans for robotic tasks when given access to accurate
+dynamical models.
+However, robots operating in the real
+world often face situations that cannot be modeled before
+execution.
+Thus, we only have access to simplified but potentially inaccurate 
+models.
+This imperfect modeling can lead to highly suboptimal plans
+or even the inability to reach the goal during execution.
+Existing approaches present a learning-based solution where real-world
+experience is used to learn a complex dynamical model that is
+subsequently used for planning. However, this requires a prohibitively
+large amount of experience over the entire state space, and can
+be wasteful if we are interested in completing the task and not in
+modeling the dynamics accurately. Furthermore, for domains where
+modeling the true dynamics is intractable such as deformable
+manipulation, or vary over time due to 
+wear and tear, the learned model can still end up being inaccurate.
+This thesis argues that using a simplified and potentially inaccurate model for
+planning allows us to significantly reduce the amount of real-world
+experience needed to provably guarantee that the robot reaches the
+goal.
+
+In completed work, we proposed two approaches in support of this
+argument. The first approach \cmax{} guarantees that the robot reaches the
+goal using the inaccurate model without any resets. This
+is achieved by biasing the planner away from transitions whose
+dynamics are discovered to be inaccurately modeled during online
+execution. However, \cmax{} requires strong assumptions on the
+accuracy of the model used for planning and fails to improve the
+quality of solution over repetitions of the same task. The second
+approach \cmaxpp{} leverages real-world experience to improve the
+quality of resulting plans over successive repetitions of a robotic
+task. CMAX++ achieves this by integrating model-free learning using
+acquired experience with model-based planning using the potentially
+inaccurate model. In addition to completeness, \cmaxpp{} also
+guarantees asymptotic convergence to the optimal path cost
+as the number of repetitions increases under relaxed
+assumptions. Crucially, both approaches do not require any updates to
+the dynamics of the model unlike any previously existing method.
+\end{abstract}
+
+% \newgeometry{left=0.5in,right=0.5in,top=1in,bottom=1.4in}
+% \begin{acknowledgments}
+% \end{acknowledgments}
+% \restoregeometry
+
+\pagestyle{plain}
+
+\tableofcontents
+\addtocontents{toc}{\vspace*{-2cm}}
+\listoffigures
+\addtocontents{lof}{\vspace*{-2cm}}
+\listoftables
+\listofalgorithms
+
+\mainmatter
+
+\chapter*{Bibliography}
+\addcontentsline{toc}{chapter}{Bibliography}
+
+\vspace{-25mm}
+This bibliography contains \total{citenum} references.
+\vspace{10mm}
+
+\printbibliography[heading=none]
+
+\end{document}
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:

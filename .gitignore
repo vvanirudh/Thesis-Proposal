@@ -1,0 +1,15 @@
+*.aux
+*.log
+*.pdf
+*.gz
+auto
+*.out
+*.blg
+*.bbl
+.DS_Store
+*.bcf
+*.loa
+*.lof
+*.lot
+*.xml
+*.toc
