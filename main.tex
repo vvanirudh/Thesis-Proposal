@@ -86,12 +86,26 @@ approach \cmaxpp{} leverages real-world experience to improve the
 quality of resulting plans over successive repetitions of a robotic
 task. \cmaxpp{} achieves this by integrating model-free learning using
 acquired experience with model-based planning using the potentially
-inaccurate model. As a consequence in addition to completeness, \cmaxpp{} also
+inaccurate model. As a consequence of this in addition to completeness, \cmaxpp{} also
 guarantees asymptotic convergence to the optimal path cost
 as the number of repetitions increases under relaxed
 assumptions. Crucially, both approaches do not require any updates to
 the dynamics of the model unlike any existing method for planning
 using inaccurate models.
+
+For the remainder of the thesis, we propose to combine the advantages
+of existing methods that update the dynamics of the model and our
+methods that update the behavior of the
+planner to guarantee task completeness. The goal is to create a unified
+framework where the agent, during the course of its execution,
+intelligently switches between (a) learning the true dynamics, (b)
+learning a model-free value estimate, or (c)
+biasing the planner away from an inaccurately modeled
+transition to guarantee that the robot completes the task while reducing
+the amount of real-world experience required. Additionally, we also
+want to explore this unified framework in the episodic setting, where
+the robot has access to resets, and in settings where the dynamics are
+nondeterministic. 
 \end{abstract}
 
 % \newgeometry{left=0.5in,right=0.5in,top=1in,bottom=1.4in}
