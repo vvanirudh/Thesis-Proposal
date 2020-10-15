@@ -13,3 +13,5 @@ auto
 *.lot
 *.xml
 *.toc
+/main.fdb_latexmk
+/main.fls

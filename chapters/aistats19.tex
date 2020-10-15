@@ -1,0 +1,757 @@
+
+\chapter{Sample Complexity of Exploration in Model-Free Policy Search}
+\label{cha:sample-compl-expl}
+
+\section{Introduction}
+Model-free policy search is a general approach to learn parameterized
+policies from sampled trajectories in the environment without
+learning a model of the underlying dynamics. These methods
+update the parameters such that trajectories with higher returns (or total reward) are
+more likely to be obtained when following the updated policy
+\citep{kober2013reinforcement}. The simplicity of these approaches have
+made them popular in Reinforcement Learning (RL).
+
+Policy gradient methods, such as REINFORCE \citep{williams1992simple}
+and its extensions \citep{kakade2002natural,bagnell2004policy, silver2014deterministic,schulman2015trust},
+compute an estimate of a direction of improvement from sampled
+trajectories collected by executing a stochastic policy. In other words, these methods rely on
+randomized exploration in action space. These methods then leverage
+the Jacobian of the policy to update its parameters to increase the
+probability of good action sequences accordingly. Such a gradient
+estimation algorithm can be considered a combination of a
+\textit{zeroth-order} approach and a \textit{first-order} approach:
+(1) it never exploits the slope of the reward function or dynamics,
+with respect to actions, but rather relies only on random exploration
+in action space to discover potentially good sequences of actions; (2)
+however, it \emph{exploits} the first order information of the
+parameterized policy for updating the policy's parameters. Note that
+the chance of finding a sequence of actions resulting in high total
+reward decreases (as much as exponentially
+\citep{kakade2002approximately}) as the horizon length increases and
+thus policy gradient methods often exhibit high variance and a
+resulting large sample complexity \citep{peters2008reinforcement,
+  zhao2011analysis}.
+
+Black-box policy search methods, on the other hand, seek to directly
+optimize the total reward in the space of parameters by employing
+, e.g., finite-difference-like methods to compute estimates of the
+gradient with respect to policy parameters
+\citep{bagnell2001autonomous,mannor2003cross,heidrich2008evolution,tesch2011using,sehnke2010parameter,salimans2017evolution,mania2018simple}.  
+Intuitively, these methods rely on exploration in parameter space: by
+searching in the parameter space, these methods may discover an
+improvement direction. Note that these methods are fully zeroth-order,
+\textit{i.e.}, they exploit no first-order information of the
+parameterized policy, the reward, or the dynamics.  Although policy gradient methods leverage \textit{more} information,
+notably the Jacobian of the action with respect to policy, black-box policy search methods have
+at times demonstrated better empirical performance (see the discussion in 
+\citep{kober2013reinforcement, mania2018simple}). These perhaps surprising results motivate us to analyze:
+\textit{In
+  what situations should we expect parameter space policy search methods
+  to outperform action space methods?}
+
+To do so, we leverage prior work in zeroth-order
+optimization methods. In the convex setting, 
+\citep{flaxman2005online, agarwal2010optimal, nesterov2017random}
+showed that one can construct %
+gradient %
+estimates using zeroth order oracles and derived upper bounds on the
+number of samples needed. 
+%
+%
+%
+But for most RL tasks,
+the return as a function of parameters, or action sequence, is highly
+non-convex \citep{sutton1998introduction}. Hence we focus on the non-convex setting and analyze convergence to stationary points. \cite{ghadimi2013stochastic, nesterov2017random} studied zeroth order
+non-convex optimization by providing upper bounds on
+the number of samples needed to close in on a stationary
+point. Computing lower bounds in zeroth order non-convex optimization is still
+an open problem %
+%
+\citep{carmon2017lower, carmon2017lower2}. 
+
+In our work, we extend the analysis proposed in \citep{ghadimi2013stochastic} to the policy search setting 
+%
+%
+and analyze the sample complexity of parameter and action space exploration methods in policy search. We begin with a degenerate, one-step control problem of online linear regression with partial feedback, \citep{flaxman2005online}, where the objective is to learn the parameters of the linear regressor without access to the true scalar regression targets. We show that for parameter space exploration methods, to achieve $\epsilon$-optimality, requires $O(b^2/\epsilon^4)$ samples, 
+%
+where $b$ is the input feature dimensionality. By contrast, an action space exploration method requires $O(1/\epsilon^4)$ many samples
+%
+with a sample complexity \textit{independent} of input feature dimensionality $b$. %
+This is tested empirically on two simple tasks:  Bandit Multi-class learning on MNIST with policies parameterized by convolutional neural networks which can be seen as a Contextual Bandit problem with rich observations, and Online Linear Regression with partial information. The results demonstrate action space exploration methods outperform  parameter space methods when the parameter dimensionality is substantially larger than action dimensionality.
+
+We present similar analysis for the multi-step control problem of model-free policy search in reinforcement learning, \citep{kober2013reinforcement}, by considering the objective of reaching $\epsilon$-close to a stationary point in the sense that $\|\nabla J(\theta)\|_2^2 \leq \epsilon$ for the non-convex objective $J(\theta)$. Our results show that, under certain assumptions, parameter space exploration methods 
+%
+need $\mathcal{O}(\frac{d^2}{\epsilon^3})$ samples to reach $\epsilon$ close to a stationary point, where $d$ is the policy parameter dimensionality. On the other hand, action space exploration methods need $\mathcal{O}(\frac{p^2H^4}{\epsilon^4})$ samples to achieve the same objective, where $p$ is the action dimensionality and $H$ is the horizon length of the task. This shows that action space exploration methods have a dependence on the horizon length $H$ %
+while parameter space exploration methods depend only on parameter space dimensionality $d$.
+%
+Ongoing work by \cite{tu2018gap} demonstrated through asymptotic lower bounds that the dependence of sample complexity of action space exploration methods on horizon $H$ is unavoidable in the LQR setting.
+This is tested empirically on popular RL benchmarks from OpenAI gym \citep{openaigym}, and the results show that as horizon length increases, parameter space methods outperform action space exploration methods. This matches the intuition and results presented in recent works like \citep{bagnell2001autonomous,szita2006learning,tesch2011using,salimans2017evolution, mania2018simple}
+%
+that show parameter space black-box policy search methods outperforming state-of-the-art action space methods for tasks with long horizon lengths.
+
+In summary, our analysis and experimental results suggests that the
+complexity of exploration in action space depends on both the
+dimensionality of action space and \emph{horizon}, while the
+complexity of exploration in parameter space solely depends on
+dimensionality of parameter space, providing a natural way to trade-off
+between these approaches.
+
+%
+%
+%
+
+%
+
+%
+%
+%
+
+
+%
+
+%
+
+%
+
+\section{Problem Setup}
+\label{sec:problem_define}
+
+
+\subsection{Multi-step Control: Reinforcement Learning}
+\label{sec:rl-problem}
+We consider the problem setting of model-free policy search with the goal of
+minimizing sum of costs (or maximizing sum of rewards) over a fixed,
+finite horizon $H$. In reinforcement learning (RL), this is typically
+formulated using Markov Decision Processes (MDP)
+\citep{sutton1998introduction}. Denote the state space of the MDP as
+$\mathcal{S} \subset 
+\mathbb{R}^b$, action space as $\mathcal{A} \subset  \mathbb{R}^p$
+, transition probabilities as
+$\mathbb{P}_{sa} = \mathbb{P}(\cdot|s, a)$ (which is the distribution of next state after
+executing action $a \in \mathcal{A}$ in state $s \in \mathcal{S}$), an
+initial state distribution $\mu$, and a cost function $c(s,a) :
+\mathcal{S} \times \mathcal{A} \rightarrow \mathbb{R}$. Note that the
+cost can be interpreted as negative of the reward. In addition to
+this, we assume a restricted class of deterministic, stationary
+policies $\Pi$ parameterized by $\theta \in \mathbb{R}^d$ where each
+$\pi(\theta, \cdot) \in \Pi$ is differentiable at all $\theta$ and is a mapping from $\mathcal{S}$ to
+$\mathcal{A}$, i.e. $\pi(\theta, \cdot): \mathcal{S} \rightarrow
+\mathcal{A}$. The distribution of states at timestep $t$ induced by
+running the policy $\pi(\theta, \cdot)$ until and including $t$, is
+defined $\forall s_t: d_{\pi_\theta}^t(s_t) = \sum_{\{s_i\}_{i \leq
+    t-1}} \mu(s_0) \prod_{i=0}^{t-1} \mathbb{P}(s_{i+1}|s_i, a_i =
+\pi(\theta, s_i))$, where by definition $d_{\pi_\theta}^0(s) = \mu(s)$
+for any $\pi$. We define the value function $V^t_{\pi_\theta}(s)$ for $t \leq H-1$ as 
+%
+\begin{equation*}
+  V^t_{\pi_\theta}(s) = \mathbb{E}[\sum_{i=t}^H c(s_i, \pi(\theta,
+s_i))|s_t = s]
+\end{equation*}
+and state-action value function $Q^t_{\pi_\theta}(s, a)$ as
+\begin{equation*}
+  Q^t_{\pi_\theta}(s, a) = c(s, a) + \mathbb{E}_{s' \sim
+                           \mathbb{P}_{sa}}[V^{t+1}_{\pi_\theta}(s')]
+\end{equation*}
+Throughout this work, we assume the total cost is upper bounded by a constant, i.e., $\sup_{c_1,\dots, c_T}\sum_{t} c_t \leq \Qbound\in\mathbb{R}^+$, to prevent confounding due to just a change in the scale of total costs. We have then that $Q^t_{\pi_\theta}$ is upper bounded by a constant $\Qbound$ for all $t$ and $\theta$.
+
+We seek to minimize
+the performance objective given by $J(\theta) = \mathbb{E}_{s \sim
+  \mu}[V^0_{\pi_\theta}(s)]$. Given this
+objective, the optimization problem  can be formulated
+as:
+\begin{equation}
+  \label{eq:1}
+  \min_\theta J(\theta)
+\end{equation}
+The goal is to find parameters $\theta^*$ that minimize the
+expected sum of costs $J(\theta)$, given no access to the underlying dynamics
+of the environment other than samples from the distribution
+$\mathbb{P}_{sa}$ by executing the policy $\pi(\theta,
+\cdot)$. However, the objective $J(\theta)$ can be highly non-convex
+and finding a global minima could be intractable. Thus, in this work, we hope to find a stationary point
+$\theta^*$ of the objective $J(\theta)$, \textit{i.e.} a point where
+$\nabla_\theta J(\theta) \approx 0$.
+
+ 
+%
+
+
+\subsection{One-Step Control: Online Linear Regression with Partial Information}
+\label{sec:define_OLR}
+The online linear regression problem is defined as follows: We denote
+$\mathcal{S}\subset\mathbb{R}^{b}$ as the feature space, and $\Theta
+\subset\mathbb{R}^{d} = \mathbb{R}^b$ as the linear policy parameter space where each
+$\theta\in\Theta$ represents a policy $\pi(\theta, s) =
+\theta^{\top}s$. Online linear regression operates in an adversarial
+online learning fashion: every round $i$, nature presents a
+feature vector $s_i\in\mathcal{S}$, the learner makes a decision by
+choosing a policy $\theta_{i}\in\Theta$ and predicts the scalar action
+$\hat{a}_i = \theta_i^{\top}s_i$; nature then reveals the loss
+$(\hat{a}_i - a_i)^2 \in\mathbb{R}^+$, which is just a scalar, to the
+learner, where $a_i$ is ground truth selected by nature and is
+never revealed to the learner.  We do not place any statistical
+assumption on the nature's process of generating feature vector $s_i$
+and ground truth $a_i$, which could be completely adversarial. Other
+than the adversarial aspect of the problem, note that the above setup
+is a special setting of RL with horizon $H=1$, linear policy
+$\theta^{\top}s_i$, one-dimension action space, and a cost function
+$c_i(\theta) = (\theta^{\top}s_i - a_i)^2$. In this setting, we
+consider the \textit{regret} with respect to the optimal solution in hindsight,
+\begin{align}
+    \mathrm{Regret} = \sum_{i=1}^{T} c_i(\theta_i) - \min_{\theta^\star\in\Theta} \sum_{i=1}^T c_i(\theta^\star)
+\end{align}
+%
+
+\section{Online Linear Regression with Partial Information}
+\label{sec:olr}
+%
+ 
+
+\subsection{Exploration in Parameter Space}
+We can apply a zeroth-order
+online gradient descent algorithm for the sequence of loss functions
+$\{c_i\}_{i=1}^T$, which is summarized in
+Algorithm~\ref{alg:random_search_OLR}. The main idea is to add random
+noise $u$, sampled from a unit sphere in $b$-dim space $\mathbb{S}_{b}$, to the parameter $\theta$, and querying loss at $\theta+\delta u$ for some $\delta > 0$. Using the received loss $c_i(\theta+\delta u)$, one can form an estimation of $\nabla_{\theta}c_i(\theta)$ as $\frac{c_i b}{\delta}u$ \citep{flaxman2005online}. 
+
+%
+
+\begin{algorithm}[ht]
+\caption{Random Search in Parameter Space (BGD \cite{flaxman2005online})}
+ \label{alg:random_search_OLR}
+\begin{algorithmic}[1]
+  \State {\bfseries Input:} $\alpha\in\mathbb{R}^+$, $\delta\in\mathbb{R}^+$.
+  \State Learner initializes $\theta_1\in\Theta$.
+  \For {$i = 1$ to $T$}
+    \State Learner samples $u\sim \mathbb{S}_{b}$. 
+    %
+    \State Learner chooses predictor $\theta_i' = \theta_i + \delta u$. 
+    \State Learner only receives loss signal $c_i(\theta_i')$. %
+    \State Learner update: $\theta_{i+1}' = \theta_i - \alpha \frac{c_i b}{\delta}u$.
+    \State Projection $\theta_{i+1} = \arg\min_{\theta\in{\Theta}}\|\theta_{i+1}'-\theta\|_2^2$.
+  \EndFor
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsection{Exploration in Action Space}
+The \emph{key difference} between exploration in action space and exploration in parameter space is that we are going to leverage our knowledge of the policy $\pi(\theta, s) = \theta^{\top} s$. Since we design the policy class, we can compute its \emph{Jacobian} with respect to its parameters $\theta$ without interaction with the environment. The Jacobian of the policy gives us a locally linear relationship between a small change in parameter and the resulting change in policy's action space. The main idea then in this approach is to explore with randomization in action space, and then leverage the Jacobian of the policy to update the parameters $\theta$ accordingly so that the policy's output moves towards better actions. Intuitively, we expect that random exploration in action space will result in smaller regret, as in our setting the action space is just $1$-dimensional, while the parameter space is $b$-dimensional.  %
+The approach is summarized in Algorithm~\ref{alg:random_search_action_olr}. Denote $\ell_i = (\hat{a}_i - a_i)^2$ and $\hat{a}_i = \pi(\theta_i, s_i) = \theta_i^{\top}s_i$. The main idea is that we can compute $\nabla_{\theta} c_i(\theta_i)$ via a chain rule as $\nabla_{\theta} c_i (\theta_i) = \frac{\partial{\ell_i}}{\partial{\hat{a}_i}}\nabla_{\theta}\pi(\theta_i, s_i)$. Note that $\nabla_{\theta}\pi(s_i, \theta_i) = \nabla_\theta \theta_i^{\top}s_i = s_i$ is the Jacobian of the policy to which we have full access. We then use zeroth order approximation method to approximate $\partial{\ell_i}/\partial{\hat{a}_i}$ at $\hat{a}_i = \pi(\theta_i, s_i)$.
+
+
+\begin{algorithm}[ht]
+\caption{Random Search in Action Space}
+ \label{alg:random_search_action_olr}
+\begin{algorithmic}[1]
+  \State {\bfseries Input:} $\alpha\in\mathbb{R}^+$, $\delta\in\mathbb{R}^+$.
+  \State Learner initializes $\theta_1\in\Theta$.
+  \For {$i = 1$ to $T$}
+    \State Learner receives feature $s_i$.
+    \State Learner samples $e$ uniformly from $\{-1,1\}$.
+    \State Learner makes a prediction $\hat{a}_i = \theta_i^{\top} s_i + \delta e$
+    \State Learner only receives loss signal $c_i = (\hat{a}_i - a_i)^2$. %
+    \State Learner update: $\theta_{i+1}' = \theta_i - \alpha \frac{c_i e}{\delta}s_i$.
+    \State Projection $\theta_{i+1} = \arg\min_{\theta\in{\Theta}}\|\theta_{i+1}'-\theta\|_2^2$.
+  \EndFor
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsection{Analysis}
+We analyze the regret of the exploration in parameter space algorithm (Alg.~\ref{alg:random_search_OLR}) and the exploration in action space algorithm (Alg.~\ref{alg:random_search_action_olr}) in this section. For analysis, we assume that $\Theta$ is bounded, i.e., $\sup_{\theta\in\Theta}\|\theta\|_2 \leq C_{\theta}\in\mathbb{R}^+$, $\mathcal{S}$ is bounded, i.e., $\sup_{s\in\mathcal{S}}\|s\|_2 \leq C_s\in\mathbb{R}^+$, and the ground truth $a_i$ is bounded, i.e., $|a_i|\leq C_{a}$ for any $i$. Under the above assumptions, we can make sure that the loss is bounded as well, $(\theta^{\top}s - a)^2 \leq C\in\mathbb{R}^{+}$. The loss function is also Lipschitz continuous with Lipschitz constant $L \leq (C_{\theta}C_{s} + C_{a})C_{s}$. We call these constants $C_{s}, C_{\theta}$, and $C_{a}$ as problem dependent constants, which are independent of feature dimension $b$ and number of rounds $T$.
+%
+In regret bounds, we absorb problem dependent constants into $\mathcal{O}$ notations, but the bounds will be explicit in $b$ and $T$. The theorem below presents the average regret analysis for these methods,
+
+\begin{theorem}
+After $T$ rounds, %
+%
+%
+%
+%
+with $\alpha = \frac{{C_{\theta}}\delta}{b(C^2+C_{s}^2)\sqrt{T}}$ and $\delta = T^{-0.25}\sqrt{\frac{C_{\theta}b(C^2+C_{s}^2)}{2L}}$, Alg.~\ref{alg:random_search_OLR} incurs average regret:
+\begin{align}
+\label{eq:random_para}
+    \frac{1}{T}(\mathbb{E}[\sum_{i=1}^T c_i(\theta_i)] - \min_{\theta^\star
+  \in \Theta}\sum_{i=1}^T c_i(\theta^\star)) \leq %
+    \mathcal{O}(\sqrt{b}T^{-\frac{1}{4}}),
+\end{align}
+and with $\alpha = \frac{C_{\theta}\delta}{(C^2+1)C_{s}\sqrt{T}}$ and $\delta = T^{-0.25}\sqrt{\frac{C_{\theta}(C^2+1)C_{s}}{2C}}$, Alg.~\ref{alg:random_search_action_olr} incurs average regret:
+\begin{align}
+\label{eq:random_action}
+    \frac{1}{T}(\mathbb{E}[\sum_{i=1}^T c_i(\theta_i)] -
+  \min_{\theta^\star \in \Theta}\sum_{i=1}^T c_i(\theta^\star)) \leq %
+    \mathcal{O}(T^{-\frac{1}{4}}),
+\end{align} for any $\theta\in\Theta$.
+\label{thm:online_linear_regression}
+\end{theorem}
+
+The proof for the above theorem can be found in our original paper~\cite{aistats19}.
+
+The above regret analysis essentially shows that exploration in action space delivers a regret bound that is independent of parameter space dimension $b$, while the regret of the exploration in parameter space algorithm will have explicit polynomial dependency on feature dimension $b$.  Converting the regret bounds to sample complexity bounds, we have that for any $\epsilon\in (0,1)$, to achieve $\epsilon$-average regret, Alg.~\ref{alg:random_search_OLR} needs $\mathcal{O}(\frac{b^2}{\epsilon^4})$ many rounds, while Alg.~\ref{alg:random_search_action_olr} requires $\mathcal{O}(1/\epsilon^4)$ many rounds.  
+
+Note that in general if we have a multivariate regression problem, i.e., $a\in\mathbb{R}^{p}$, regret of Algorithm~\ref{alg:random_search_action_olr} will depend on $\sqrt{p}$ as well. But from our extreme case with $p=1$, we clearly demonstrate the sharp advantage of exploration in action space: \emph{when the action space's dimension is smaller than the dimension of parameter space}, we should prefer the strategy of exploration in action space.
+
+
+
+
+\section{Reinforcement Learning}
+\label{sec:RL}
+
+In this section, we study exploration in parameter space versus exploration in action space for multi-step control problem of model-free policy search in RL. As explained in Section~\ref{sec:problem_define}, we are interested in rates of convergence to a stationary point of $J(\theta)$.
+
+\subsection{Exploration in Parameter Space}
+\label{sec:parameter_space}
+The objective defined in Section \ref{sec:rl-problem} can be optimized
+directly over the space of parameters $\mathbb{R}^d$. Since we do not use first-order (or gradient) information about the
+objective, this is equivalent to derivative-free (or zeroth-order)
+optimization with noisy function evaluations. More specifically, for a parameter vector
+$\theta$, we can execute the corresponding policy $\pi(\theta, \cdot)$
+in the environment, to obtain a noisy estimate of $J(\theta)$. This
+noisy function evaluation can be used to construct a gradient estimate
+and an iterative stochastic gradient descent approach can be used to
+optimize the objective. An algorithm that closely follows the ones
+proposed in \citep{agarwal2010optimal, mania2018simple}
+ and optimizes over the space of parameters  is shown in Algorithm
+\ref{alg:random_search_parameter}. Since we are working in episodic RL setting, we can use a two-point estimate to form a gradient estimation (Line 7 \& 8 in Alg.~\ref{alg:random_search_parameter}), which in general will reduce the variance of gradient estimation \citep{agarwal2010optimal}, compared to one-point estimates.
+\begin{algorithm}[ht]
+\caption{Policy Search in Parameter Space}
+ \label{alg:random_search_parameter}
+\begin{algorithmic}[1]
+  \State {\bfseries Input:} Learning rate $\alpha \in\mathbb{R}^+$, standard deviation of exploration noise $\delta\in\mathbb{R}$
+  \State Initialize parameters $\theta_1\in\mathbb{R}^d$
+  \For {$i = 1$ to $T$}
+    \State Sample $u \sim \mathbb{S}_d$ , a $d$-dimensional unit sphere
+    \State Construct parameters $\theta_i + \delta u$, $\theta_i - \delta u$
+    \State Execute policies $\pi({\theta_i + \delta u}, \cdot),
+    \pi({\theta_i - \delta u}, \cdot)$ 
+    \State Obtain noisy estimates of the objective $J^+_i = J(\theta_i
+    + \delta u) + \eta^+_i$ and $J^-_i = J(\theta_i - \delta u) +
+    \eta^-_i$ where $\eta^+_i, \eta^-_i$ are zero mean random i.i.d noise
+    \State Compute gradient estimate $g_i = \frac{d(J^+_i - J^-_i)}{2\delta} u $
+    \State Update $\theta_{i+1} = \theta_i - \alpha g_i$
+  \EndFor
+\end{algorithmic}
+\end{algorithm}
+We will analyze the finite rate of convergence of Algorithm \ref{alg:random_search_parameter} to a stationary point of the non-convex objective $J(\theta)$. First, we will lay out the assumptions and then present the convergence analysis. 
+\paragraph{Assumptions and Analysis}
+\label{sec:assumptions_parameter}
+
+To analyze convergence to stationary point of a nonconvex objective, we make several assumptions about the objective. Firstly, we assume that $J(\theta)$ is differentiable with respect to $\theta$ over the entire domain. We also assume that $J(\theta)$ is $G$-lipschitz and $L$-smooth, i.e. for all $\theta_1, \theta_2 \in \mathbb{R}^d$, we have $|J(\theta_1) - J(\theta_2)| \leq G\|\theta_1 - \theta_2\|$ and $\|\nabla_\theta J(\theta_1) - \nabla_\theta J(\theta_2)\|\leq L\|\theta_1 - \theta_2\|$. 
+%
+Note that these assumptions are similar to the assumptions made in other zeroth-order analysis works, \citep{flaxman2005online, agarwal2010optimal, duchi2015optimal, shamir2013complexity, ghadimi2013stochastic, nesterov2017random}.
+
+%
+%
+
+Our analysis is along the lines of works like \citep{ghadimi2013stochastic,
+  nesterov2017random} that also analyze the convergence to stationary points in
+zeroth order non-convex optimization. The general strategy is to first construct a smoothed version of the objective $J(\theta)$, denoted as $\hat{J}(\theta) = \mathbb{E}_{v\sim \mathbb{B}_{d}}[J(\theta+\delta v)]$, where $\mathbb{B}_d$ is the $d$-dimensional unit ball. We can then show that Algorithm~\ref{alg:random_search_parameter} is essentially running SGD on the objective function $\hat{J}(\theta)$, which allows us to apply standard SGD analysis on $\hat{J}(\theta)$. Lastly we link the stationary point of the smoothed objective $\hat{J}(\theta)$ to that of the objective $J(\theta)$ using the assumptions on ${J}(\theta)$.
+
+\begin{theorem}
+  \label{theorem:parameter-convergence}
+  Consider running Algorithm \ref{alg:random_search_parameter} for $T$
+  steps where the true objective $J(\theta)$ satisfies the assumptions stated above.
+  Then we have,
+  \begin{equation}
+    \label{eq:parameter-convergence}
+    \frac{1}{T}\sum_{i=1}^T \mathbb{E}\|\nabla_\theta
+    J(\theta_i)\|_2^2 \leq \mathcal{O}(\Qbound^{\frac{1}{2}}dT^{\frac{-1}{2}} + \Qbound^{\frac{1}{3}}d^{\frac{2}{3}}T^{\frac{-1}{3}}\sigma)
+  \end{equation}
+  where $J(\theta)\leq \Qbound$ for all $\theta \in \Theta$ and $\sigma^2$ is the variance of the random noise $\eta$ in Algorithm \ref{alg:random_search_parameter}.
+\end{theorem}
+The proof for the above theorem can be found in our original
+paper~\cite{aistats19}.
+
+The above theorem gives us a convergence rate to a stationary point of
+policy search in parameter space. The role of variance of i.i.d noise
+in the noisy evaluations of the true objective is very
+important. Consider the case where there is little stochasticity in
+the environment dynamics, i.e. $\sigma \rightarrow 0$, then the first term in
+Equation \ref{eq:parameter-convergence} becomes dominant and we only
+need at most $\mathcal{O}(\frac{d^2\Qbound}{\epsilon^2})$ samples to reach a point $\theta$
+where $\mathbb{E}\|\nabla_\theta J(\theta)\|_2^2 \leq
+\epsilon$. However, if there is a lot of stochasticity in the
+environment dynamics then the second term is dominant and we need at most
+$\mathcal{O}(\frac{d^2\Qbound\sigma^3}{\epsilon^3})$ samples. It is
+interesting to observe the direct impact that the stochasticity of
+environment dynamics has on convergence rate of policy search, which
+is also experimentally demonstrated in
+Sec.~\ref{sec:effect-stoch-param}. Note that the convergence rate has
+no dependency on horizon length $H$ because of the regularity
+assumption we used on total reward: $J$ is always bounded by a
+constant $\Qbound$ that is independent of $H$. However, as we will see
+later, even under the regularity assumption convergence rate of action
+space exploration methods have an explicit dependence on $H$
+which will prove to be the primary
+reason why black-box parameter space policy search methods in \citep{mania2018simple} have been so effective when compared to action space methods.
+
+
+\subsection{Exploration in Action Space}
+\label{sec:action_space}
+
+Another way to optimize the objective defined in Section \ref{sec:rl-problem}
+is to optimize over the space of actions $\mathcal{A}$. From \citep{silver2014deterministic}, we know that for
+$J(\theta) = \mathbb{E}_{s \sim \mu}[V^0_{\pi_\theta}(s)]$ we can express the
+gradient as
+\begin{align}
+  \label{eq:dpg-gradient}
+  \nabla_\theta J(\theta) &= \sum_{t=0}^{H-1} \mathbb{E}_{s_t \sim
+    d^t_{\pi_\theta}} \left[\nabla_\theta \pi(\theta, s_t) \nabla_a
+  Q^t_{\pi_\theta}(s_t, \pi(\theta, s_t))\right]
+\end{align}
+Observe that the first term in the above gradient $\nabla_\theta
+\pi(\theta, s)$ is the Jacobian of the policy, the local linear relationship
+between  a small change in policy parameters $\theta$ and a small change in its output, i.e., actions. The second term $\nabla_{a}Q(s,a)$ is actually the improvement direction at state action pair $(s,a)$, i.e., conditioned on state $s$, if we move action $a$ an infinitesimally small step along the negative gradient $-\nabla_{a}Q(s,a)$, we decrease the cost-to-go $Q(s,a)$. Eqn~\ref{eq:dpg-gradient} then leverages policy's Jacobian to transfer the improvement direction in action space to an improvement direction in parameter space.  
+
+%
+
+We can compute Jacobian $\nabla_{\theta}\pi(\theta,s)$ exactly as we have knowledge of the policy function, i.e, we can leverage the first-order information of the parameterized policy. The
+second term $\nabla_a Q_{\pi_\theta}^t(s, \pi(\theta, s_t))$, however, is unknown as it depends on the dynamics and cost functions and
+needs to be estimated by interacting with the environment. We could
+employ a similar algorithm as Algorithm \ref{alg:random_search_parameter}, shown in Algorithm \ref{alg:random_search_action}, to
+obtain an estimate of the gradient $\nabla_a Q_{\pi_\theta}^t(s,
+\pi(\theta, s_t))$, i.e., a zeroth order estimation of $\nabla_{a}Q^{t}_{\pi_{\theta}}$, computed as $\frac{p \tilde{Q}_i}{\delta}u$, where $\tilde{Q}_i$ is an unbiased estimate of ${Q}^{t}_{\pi_{\theta_i}}(s_t, \pi(\theta_i,s_t)  + \delta u)$, with $u\sim \mathbb{S}_{p}$ (Line 7 \& 9 in Alg.~\ref{alg:random_search_action}).
+
+
+Another important difference from Algorithm
+\ref{alg:random_search_parameter} is the fact that we use a one-point
+estimate for the gradient $g_i$ in Algorithm
+\ref{alg:random_search_action}. We cannot employ the idea of two-point estimate  in random exploration
+in action space to reduce the variance of the estimate of $\nabla_{a}Q^{t}_{\pi_{\theta}}(s_t,a)$. This is due to the fact that environment is stochastic, and we cannot guarantee that we will reach the same state $s_t$ at any two independent roll-ins with $\pi_{\theta}$ at time step $t$.
+\begin{algorithm}[ht]
+\caption{Policy Search in Action Space}
+ \label{alg:random_search_action}
+\begin{algorithmic}[1]
+  \State {\bfseries Input:} Learning rate $\alpha \in\mathbb{R}^+$,
+  standard deviation of exploration noise $\delta\in\mathbb{R}$,
+  Horizon length $H$, Initial state distribution $\mu$
+  \State Initialize parameters $\theta_1\in\mathbb{R}^d$
+  \For {$i = 1$ to $T$}
+    \State Sample $u \sim \mathbb{S}_p$ , a $p$-dimensional unit
+    sphere
+    \State Sample uniformly $t \in \{0, \cdots, H-1\}$
+    \State Execute policy $\pi(\theta_i, \cdot)$ until $t-1$ steps
+    \State Execute perturbed action $a_t = \pi(\theta_i, s_t) + \delta
+    u$ at timestep $t$ and continue with policy $\pi(\theta_i, \cdot)$
+    until timestep $H-1$
+    to obtain an estimate $\tilde{Q}_i = Q^t_{\pi_{\theta_i}}(s_t,
+    \pi(\theta_i, s_t) + \delta u) + \tilde{\eta}_i$ where
+    $\tilde{\eta}_i$ is zero mean random noise
+    \State Compute policy Jacobian
+    $\Psi_i = \nabla_\theta \pi(\theta_i, s_t)$
+    \State Compute gradient estimate $g_i = H\Psi_i\frac{p\tilde{Q}_i}{\delta}u$
+    \State Update $\theta_{i+1} = \theta_i - \alpha g_i$
+  \EndFor
+\end{algorithmic}
+\end{algorithm}
+Similar to Section \ref{sec:parameter_space}, we will analyze the rate of convergence of Algorithm \ref{alg:random_search_action}
+to a stationary point of the objective $J(\theta)$. The following
+section will lay out the assumptions and  present the convergence
+analysis.
+
+\paragraph{Assumptions and Analysis}
+\label{sec:assumptions_action}
+
+The assumptions for policy search in action space are similar to the
+assumptions in Section \ref{sec:assumptions_parameter}. We assume that
+$J(\theta)$ is differentiable with respect to $\theta$ over the entire domain. We
+also assume that $J(\theta)$ is $G$-lipschitz and $L$-smooth. In
+addition to these assumptions, we will assume that the policy function
+$\pi(\theta, s)$ is $K$-lipschitz in $\theta$ and the state-action
+value function $Q^t_{\pi_\theta}(s, a)$ is $W$-lipschitz and $U$-smooth in $a$. Finally, we assume that the state-action value function $Q(s,a)$ is differentiable with respect to $a$ over the entire domain.  Note that the Lipschitz assumptions above on $J(\theta)$, $Q^{t}_{\pi_{\theta}}(s,a)$, and $\pi(\theta,s)$ are also used in the analysis of Deterministic policy gradient \citep{silver2014deterministic}. We need extra smoothness assumption to study the convergence of our algorithms. 
+
+Note that the gradient estimate $g_i$ used in
+Algorithm \ref{alg:random_search_action} is a biased estimate
+of $\nabla_\theta J(\theta)$. We can show this by considering
+\begin{align*}
+  \mathbb{E}_i[g_i] = \mathbb{E}_t \mathbb{E}_{s_t \sim
+  d_{\pi_{\theta_i}}^t}\left[H\nabla_\theta \pi(\theta_i, s_t) \mathbb{E}_{u
+  \sim \mathbb{S}_p}\left[\frac{p\tilde{Q}_i}{\delta}u\right]\right]
+\end{align*}
+where $\mathbb{E}_i$ denotes expectation with respect to the randomness at iteration $i$.
+From \citep{flaxman2005online}, we have that $\mathbb{E}[\frac{p\tilde{Q}_i}{\delta}u] = \nabla_a \mathbb{E}_{v
+\sim \mathbb{B}_p}[Q_{\pi_{\theta_i}}^t(s_t, \pi(\theta_i, s_t) + \delta v)]$ so we can rewrite the above equation as
+\begin{align*}
+  \mathbb{E}[g_i]
+  &= \sum_{t=0}^{H-1}\mathbb{E}_{s_t \sim
+    d_{\pi_{\theta_i}}^t}\mathbb{E}_{v \sim
+    \mathbb{B}_p}\left[\nabla_\theta \pi(\theta_i, s_t)\nabla_a
+    Q_{\pi_{\theta_i}}^t(s_t, \pi(\theta_i, s_t) + \delta v)\right]
+\end{align*}
+
+Comparing the above expression with equation \ref{eq:dpg-gradient}, we can see that $g_i$ is not an unbiased
+estimate of the gradient $\nabla_\theta J(\theta)$. We can also explicitly upper bound the variance of $g_i$ by $\mathbb{E}_i\|g_i\|_2^2$. Note that in the limit when $\delta\to 0$, $g_i$ becomes an unbiased estimate of $\nabla_{\theta}J(\theta)$, but the variance will approach to infinity. In our analysis, we explicitly tune $\delta$ to balance the bias and variance. 
+
+\begin{theorem}
+\label{theorem:action-convergence}
+  Consider running Algorithm \ref{alg:random_search_action} for $T$
+  steps where the objective $J(\theta)$ satisfies the assumptions stated above. Then, we have %
+  %
+  %
+  %
+  \begin{equation}
+    \label{eq:action-convergence}
+    \frac{1}{T}\sum_{i=1}^T \mathbb{E}\|\nabla_\theta
+    J(\theta_i)\|_2^2 \leq \mathcal{O}(T^{-\frac{1}{4}}Hp^{\frac{1}{2}}(\Qbound^3 + \sigma^2\Qbound)^{\frac{1}{4}})
+  \end{equation}
+  where $J(\theta)\leq \Qbound$ for all $\theta \in \Theta$ and $\sigma^2$ is the variance of the random noise $\tilde{\eta}$ in Algorithm \ref{alg:random_search_action}.
+\end{theorem}
+The proof for the above theorem can be found in our original paper~\cite{aistats19}.
+
+The above theorem gives us a convergence rate to a stationary point of
+$J(\theta)$ for policy search in action space. This means that to
+reach a point $\theta$ where $\mathbb{E}\|\nabla_\theta
+J(\theta)\|_2^2 \leq \epsilon$, policy search in action space needs at
+most $\mathcal{O}\left( \frac{p^2H^4}{\epsilon^4} (\Qbound^3 + \sigma^2\Qbound) \right)$
+samples. Interestingly, the convergence rate has a
+dependence on the horizon length $H$, unlike policy search in
+parameter space.
+%
+%
+%
+%
+Also, observe that the 
+convergence rate has no dependence on the parameter dimensionality $d$ as we have complete
+knowledge of the Jacobian of policy, and  we have a dependence
+on stochasticity of the environment $\sigma$ that slows down the convergence as the stochasticity 
+increases, similar to policy search in parameter space.
+
+\section{Experiments}
+\label{sec:experiments}
+Given the analysis presented in the previous sections, we test the
+convergence properties of parameter and action space policy search
+approaches across several experiments: Contextual Bandit with rich observations, Linear Regression, RL
+benchmark tasks and Linear Quadratic Regulator (LQR). We use Augmented Random Search (ARS), from 
+\citep{mania2018simple}, as the policy search in parameter space
+method in our experiments as it has been empirically shown to be
+effective in RL tasks. For policy search in action space, we use
+either REINFORCE 
+\citep{williams1992simple}, or ExAct (Exploration in Action Space), the method described by
+Algorithm \ref{alg:random_search_action}.
+In all the plots shown, solid lines
+represent the mean estimate over $10$ random seeds and shaded regions
+correspond to $\pm 1$ standard error.
+The code for all our experiments can be found here\footnote{\url{https://github.com/LAIRLAB/contrasting_exploration_rl}}\footnote{\url{https://github.com/LAIRLAB/ARS-experiments}}.
+
+\subsection{One-Step Control}
+\label{sec:one-step-control}
+
+In these sets of experiments, we test the convergence rate of policy
+search methods for one time-step prediction. The objective is to minimize the instantaneous cost incurred. The motivation behind such experiments is that we want to
+understand the dependence of different policy search methods on
+parametric dimensionality $d$ without the effect of horizon length
+$H$.
+
+%
+%
+
+
+\paragraph{MNIST as a Contextual Bandit} Our first set of experiments is the MNIST digit recognition task 
+\citep{lecun1998gradient}. To formulate the task in an RL framework, we
+consider a sequential decision making problem where at each time-step
+the agent is given the features of the image and needs to predict one
+of ten actions (corresponding to digits). A reward of $+1$
+is given for predicting the correct digit, and a reward of $-1$ for
+an incorrect prediction. With this reduction, the problem is essentially a Contextual Bandit Problem \citep{agarwal2014taming}. We use a standard LeNet-style convolutional architecture,
+\citep{lecun1998gradient}, with $d=21840$ trainable parameters.
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.5\linewidth]{figures/aistats19/mnist.pdf}
+  \caption{Mean test accuracy with standard error for different
+    approaches against number of samples}
+  \label{fig:mnist}
+\end{figure}
+Figure \ref{fig:mnist} shows the learning curves for SGD under standard full-information
+supervised learning setting with cross entropy loss, REINFORCE and ARS. 
+%
+%
+%
+We can
+observe that in this setting where the parameter space dimensionality
+$d$ significantly exceeds the action space dimensionality $p = 1$, policy search in
+action space outperforms parameter space methods.
+
+%
+%
+
+\paragraph{Linear Regression with Partial Information} These set of experiments are designed to understand how the sample
+complexity of different policy search methods vary as the parametric
+complexity is varied. More specifically, from our analysis in Section \ref{sec:olr}, we know
+that sample complexity of parameter space methods have a dependence on
+$d$, the parametric complexity, whereas action space methods have no
+dependence on $d$. We test this hypothesis in this experiment using artificial data
+with varying input dimensionality and output scalar values.
+%
+%
+%
+%
+%
+%
+\begin{figure*}[t]
+  \centering
+  \begin{subfigure}{0.32\linewidth}
+    \includegraphics[width=\linewidth]{figures/aistats19/lin_10_all_log.pdf}\label{fig:lin10}
+\end{subfigure}
+\begin{subfigure}{0.32\linewidth}
+  \includegraphics[width=\linewidth]{figures/aistats19/lin_100_all_log.pdf}\label{fig:lin100}
+\end{subfigure}
+\begin{subfigure}{0.32\linewidth}
+  \includegraphics[width=\linewidth]{figures/aistats19/lin_1000_log.pdf}\label{fig:lin1000}
+\end{subfigure}
+  \caption{Linear Regression Experiments with varying input
+    dimensionality}
+  \label{fig:linear}
+\end{figure*}
+Figure~\ref{fig:linear} shows the learning curves for standard full-information
+supervised learning approaches with full access to the square loss (SGD \& Newton), REINFORCE, natural REINFORCE
+\citep{kakade2002natural}, and ARS as we increase the 
+input dimensionality, and hence parametric dimensionality $d$. 
+%
+%
+%
+Note that we have not included natural REINFORCE and Newton method in
+Figure~\ref{fig:linear} (right) as extensive hyperparameter search for these methods is computationally expensive in such high dimensionality settings.
+The learning curves in Figure~\ref{fig:linear}
+match our expectations, and show that action space policy
+search methods do not degrade as parametric dimensionality increases
+whereas parameter space methods do. Moreover, action space methods lie
+between the curves of supervised learning and parameter space
+methods as they take advantage of the Jacobian of the policy and
+learn  more quickly than parameter space methods.
+
+
+\subsection{Multi-Step Control}
+\label{sec:multi-step-control}
+
+The above experiments provide insights on the dependence of
+policy search methods on parametric
+dimensionality $d$. We now shift our focus on to the dependence on horizon
+length $H$.
+In this set of experiments, we extend the time horizon and test the convergence rate of
+policy search methods for multi-step control. The objective is to
+minimize the sum of costs incurred over a horizon $H$, i.e. $J(\theta)
+= \mathbb{E}[\sum_{t=1}^T c(s_t, a_t)]$. According to our analysis, we
+expect action space policy search methods to have a dependence
+on the horizon length $H$.
+
+\begin{figure*}[t]
+  \centering
+  \begin{subfigure}{0.32\linewidth}
+    \includegraphics[width=\linewidth]{figures/aistats19/plt_Swimmer-v2.pdf}\label{fig:swimmer}
+  \end{subfigure}
+  \begin{subfigure}{0.32\linewidth} \includegraphics[width=\linewidth]{figures/aistats19/plt_HalfCheetah-v2.pdf}\label{fig:halfcheetah}
+  \end{subfigure}
+  \begin{subfigure}{0.32\linewidth}
+    \includegraphics[width=\linewidth]{figures/aistats19/plt_lqr.pdf}\label{fig:lqr}
+  \end{subfigure}
+  \caption{Multi-step Control. The left and middle figures show
+    performance of different methods as horizon length varies. The
+    right figure shows number of samples needed to reach
+    close to a stationary point as noise in dynamics varies}
+  \label{fig:multistep}
+\end{figure*}
+
+%
+%
+%
+%
+%
+%
+%
+%
+
+%
+%
+%
+%
+%
+%
+%
+
+
+We test ARS and ExAct on two popular continuous control simulated
+benchmark tasks in OpenAI gym \citep{openaigym}: Swimmer and
+HalfCheetah. We chose these two environments as they allow you to vary
+the horizon length $H$ without terminating the task early. For both
+tasks, we use linear policies as they have been shown to be very
+effective in \citep{mania2018simple, rajeswaran2017towards}. Swimmer
+has an observation space dimensionality of $d = 8$ and a continuous
+action space of dimensionality $p = 2$. Similarly, for HalfCheetah
+$d=17$ and $p=6$. Figure~\ref{fig:multistep} (left and middle) show the
+performance of both approaches in terms of the mean return $J(\theta)$ (expected sum of
+rewards) they obtain as the horizon length $H$ varies. 
+%
+%
+%
+Note that both
+approaches are given access to the same number of samples $10^4 \times
+H$ from the environments for each horizon length $H$. In the regime of
+short horizon lengths, action space methods are better than parameter
+space methods as they do not have a dependence on parametric
+complexity $d$. However, as the horizon length increases, parameter
+space methods start outperforming action space methods handily as they
+do not have an explicit dependence on the horizon length, as pointed out
+by our analysis. We have observed the same trend of parameter space
+methods handily outperforming action space methods as far as $H =
+200$ and expect this trend to continue beyond. This empirical insight
+combined with our analysis presented in 
+Sections \ref{sec:parameter_space}, \ref{sec:action_space} explains
+why ARS, a simple parameter space search method, outperformed
+state-of-the-art actor critic action space search methods in
+\citep{mania2018simple} on OpenAI gym benchmarks where the horizon
+length $H$ is typically as high as $1000$. 
+%
+\paragraph{Effect of environment stochasticity}
+\label{sec:effect-stoch-param}
+
+In this final set of experiments, we set out to understand the effect
+of stochasticity in environment dynamics on the performance of
+policy search methods. As our analysis in Sections
+\ref{sec:parameter_space} and \ref{sec:action_space} points out, the
+stochasticity of the environment plays an important role in
+controlling the variance of our gradient estimates in zeroth order
+optimization procedures. To empirically observe this, we use a
+stochastic LQR environment where we have access to the true cost
+function $c$ and hence, can compute the gradient $\nabla_\theta
+J(\theta)$ exactly. Given access to such information, we vary the
+standard deviation $\sigma$ of the noise in LQR dynamics and observe the number of samples needed for
+ARS to reach $\theta$ such that
+$\|\nabla_\theta J(\theta)\|_2^2 \leq 0.05$.
+%
+%
+%
+%
+%
+%
+%
+%
+Figure~\ref{fig:multistep} (right) presents the number of samples needed to reach
+close to a stationary point of $J(\theta)$ as the standard deviation
+of noise in LQR dynamics varies. 
+%
+%
+%
+Note that we limit the maximum number of
+samples to $10^6$ for each run. The results match our expectations from
+the analysis, where we observed
+that as the stochasticity of the environment increases, convergence
+rate of policy search methods slows down.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+Parameter space exploration via black-box optimization methods have
+often been shown to outperform sophisticated action space exploration approaches for the reinforcement learning problem. Our work highlights the major difference between parameter and action space exploration methods: the latter leverages 
+%
+Jacobian of the parameterized policy. This allows sample complexity of action space exploration methods to be independent of parameter space dimensionality and only dependent on the dimensionality of action space and horizon length. For domains where the action space dimensionality and horizon length are small and the dimensionality of parameter space is large,
+%
+we conclude that exploration in action space should be preferred. On
+the other hand, for long horizon control problems with low dimensional
+policy parameterization, exploration in parameter space will
+outperform exploration in action space.
+
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: "../main"
+%%% End:

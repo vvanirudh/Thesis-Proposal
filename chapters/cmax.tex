@@ -1,0 +1,1704 @@
+\chapter{Planning and Execution using Inaccurate Models}
+\label{cha:plann-exec}
+
+\section{Introduction}
+\label{sec:introduction}
+
+Modern robotic planning approaches involve use of models that tend to
+be sophisticated and complex. These models are used to simulate the
+dynamics of the real world and foresee the outcomes of actions
+executed. From using fast analytical solvers to generate motion
+primitives on-the-fly \cite{DBLP:conf/icra/CohenSCL11} to 
+simulators that do reasoning based on physics, and optimization to resolve
+contacts \cite{DBLP:conf/iros/TodorovET12}, these models are getting better at
+modeling the dynamics of the real world. However, real world robotic
+tasks are rife with situations that cannot be predicted and therefore,
+modeled before execution. Thus, we need a
+planning approach that can use potentially inaccurate models and still
+complete the task.
+
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}{.5\columnwidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_dumbbell_full.jpg}
+  \end{subfigure}
+  %\hspace{3mm}
+  \begin{subfigure}{.4\columnwidth}
+    \includegraphics[width=\linewidth]{figures/cmax/gridworld_ice.pdf}
+  \end{subfigure}  
+  \caption{(left) PR2 executing a pick-and-place task with a heavy
+    object that is modeled as light, resulting in hitting joint torque
+    limits during execution. (right) Mobile
+    robot navigating a gridworld with icy states, where the robot slips, that are not modeled
+    as icy resulting in discrepancy in dynamics.}
+  \label{fig:intro}
+  
+\end{figure}
+
+For example, consider the task depicted in Figure~\ref{fig:intro}
+(left) where a robotic arm needs to pick an object and place it at a
+goal location. Without knowledge of the mass of the object, the model
+can be inaccurate in simulating the dynamics. If the object is modeled
+as light, the planned 
+path would pick it to a certain height before placing it at the
+goal location. However, if the object is heavy in the real world, like
+in Figure~\ref{fig:intro} (left), this plan cannot be executed as the
+joint torque limits are reached and the arm cannot move higher. Thus, by
+using the inaccurate model for planning, the arm is stuck and cannot reach the
+goal. Figure~\ref{fig:intro} (right) presents another simple scenario
+where a mobile robot is navigating a gridworld containing icy
+states, where the robot slips, i.e.
+if the robot tries to go right or left in an icy state, it will move two cells rather
+than one cell in that direction. However, the model used for planning
+does not model the icy states and hence, cannot
+simulate the real world dynamics correctly. This can lead to highly
+suboptimal paths or sometimes even inability to reach the goal, when using such a model for planning.
+
+A typical solution to this problem is to update the dynamics of the
+model and replan \cite{DBLP:journals/sigart/Sutton91}. However, this
+is often impossible in real world planning problems 
+where we use models that are complex and in some cases obtained from
+expensive computation that is done offline before execution
+\cite{DBLP:conf/wafr/HauserBHL06}. The
+dynamics of these models cannot be changed online arbitrarily without
+deteriorating their simulation capabilities in other scenarios and sacrificing
+real-time execution. In addition, this solution might require us to have
+the knowledge of what part of the model dynamics is inaccurate and
+how to correct it. Going
+back to the pick-and-place example in Figure~\ref{fig:intro}, to
+update the model we need to first identify
+that the modeled mass is incorrect and then estimate the true mass to
+correct the dynamics of the model. Both of these steps require
+specialized non-trivial implementations. Finally, in the case of models that
+\emph{can} be updated online efficiently, it might still not be possible to
+model the true dynamics without an unreasonably large number of online
+executions because the true dynamics are
+often very complex, e.g. modeling cooperative navigation dynamics in
+human crowds \cite{DBLP:conf/icra/VemulaMO17}. The above aspects make the 
+solution of updating model dynamics online undesirable in real world robotic
+tasks, where we are interested in completing the task and \emph{not} in
+modeling the dynamics accurately.
+
+In this work, we present an alternative approach \textsc{Cmax} for
+interleaving planning and 
+execution that does not require updating
+the dynamics of the model. Instead during execution, whenever we discover an action
+where the dynamics differ between the real world and the model, we
+update the cost function to penalize executing such state-action pairs
+in the future. This biases the planner to replan paths that do not
+consist of such state-action pairs, and thereby avoid regions of
+state-action space where the dynamics are known to differ. Based on
+this idea, we present
+algorithms for both small state spaces, where we can do
+exact planning, and large state spaces, including continuous state
+spaces, where we resort to function 
+approximation to update the cost function and to maintain cost-to-go
+estimates.
+Our framework \textsc{Cmax} comes with provable guarantees on
+reaching 
+the goal, without any resets, under specific assumptions on
+the model.
+The proposed algorithms are tested on a range of tasks
+including simulated 4D planar pushing as well as
+physical robot 3D pick-and-place task where the mass of the object is
+incorrectly modeled, and 7D arm planning tasks when one of the joints
+is not operational, leading to discrepancy in dynamics. 
+
+
+\section{Preliminaries}
+\label{sec:preliminaries}
+
+We are interested in the deterministic shortest path problem
+represented by the tuple $M = (\statespace, \actionspace, \goalspace,
+f, c)$ where $\statespace$ denotes the state space, $\actionspace$
+denotes the action space, $\goalspace \subseteq \statespace$ is the
+non-empty set of goal states we are
+interested in reaching, $f: \statespace \times \actionspace
+\rightarrow \statespace$ denotes the deterministic dynamics governing
+the transition to next state given current state and action, and $c:
+\statespace \times \actionspace \rightarrow [0, 1]$ is the cost
+function. For the purposes of
+this work, we will focus on small
+discrete action spaces, bounded costs lying between $0$ and
+$1$\footnote{Any bounded non-negative cost can be scaled to fit
+  this assumption}, and a cost-free termination goal state i.e. for
+all $g \in \goalspace$, we have
+$c(g, a) = 0$
+and $f(g, a) = g$ for all actions $a \in \actionspace$.
+% In our
+% motivating gridworld example (Figure~\ref{fig:intro} right), $\statespace$ is the $2$D discretized
+% grid, $\actionspace$ consists of the $4$ actions that move the robot in
+% the 4 cardinal directions by one cell, the goal space consists of the
+% goal cell that we wish the agent to reach, the deterministic dynamics $f$
+% simply move the robot to the next cell according to the action
+% executed and whether the state is icy or not, and the cost
+% is $1$ if the robot is not at goal, $0$ otherwise.
+The objective of the shortest path problem is to find the least-cost path from any given start state $\startstate
+\in \statespace$ to any goal state $g \in \goalspace$
+in $M$.
+% \begin{figure}[t]
+%   \centering
+%   \includegraphics[width=0.6\linewidth]{figures/cmax/pr2_dumbbell_full.jpg}
+%   \caption{PR2 executing a pick-and-place task with a heavy
+%      object that is modeled as light, resulting in hitting joint torque
+%      limits during execution.}
+%    \label{fig:intro}
+% \end{figure}
+We assume that there
+exists at least one path from each state $s \in
+\statespace$ to one of the goal states $g \in \goalspace$ in $M$, and
+that the
+cost of any transition starting from a non-goal state is positive i.e. $c(s, a)
+> 0$ for all $s \in \statespace \setminus \goalspace, a \in
+\actionspace$. These assumptions are typical for analysis in
+deterministic shortest path problems
+\cite{DBLP:books/lib/Bertsekas05}. 
+We use $V(s)$ to denote the cost-to-go estimate of any state $s \in
+\statespace$ and $V^*(s)$ to denote the optimal cost-to-go. From
+dynamic programming literature \cite{DBLP:books/lib/Bertsekas05}, we know
+that the optimal cost-to-go satisfies the Bellman optimality condition
+$V^*(s) = \min_{a \in \actionspace} [c(s, a) + V^*(f(s, a))]$.
+% A stationary policy $\pi:\statespace \rightarrow 
+% \actionspace$ is a deterministic rule that produces
+% the action to execute at any given state, and we use $V_M^\pi(s_i) =
+% \sum_{t=i}^\infty c(s_t, \pi(s_t))$ to
+% denote the cost-to-go of the policy $\pi$ from state $s$. From the definition, we can
+% see that any policy that does not reach goal has infinite cost-to-go
+% and from our assumption, there exists at least one policy that reaches
+% the goal and has finite cost-to-go. From dynamic programming
+% literature \cite{bertsekas1995dynamic}, we know that among the
+% policies with finite cost-to-go there exists an
+% optimal stationary policy $\pi^*$ that satisfies the Bellman optimality condition
+% $V_M^\optimalpolicy(s) = \min_{a \in \actionspace}c(s, a) +
+% V_M^\optimalpolicy(f(s, a))$ and $V_M^{\pi^*}(s) \leq V_M^\pi(s)$, for
+% all $s \in \statespace$ and any policy $\pi$.
+A cost-to-go estimate $V$ is
+called admissible if it underestimates the optimal cost-to-go
+$V(s) \leq V^*(s)$ for all $s \in \statespace$, and
+is called consistent if it satisfies the condition that for any
+state-action pair $(s, a), s\notin\goalspace$, $V(s) \leq c(s, a) + V(f(s, a))$, and $V(g) = 0$ for
+all $g \in \goalspace$.
+% Our goal of
+% finding the least-cost path from any start state to a goal state is the
+% same as finding the optimal policy $\optimalpolicy$.
+
+In this work, we assume that the exact dynamics are
+initially unknown to the robot, and can only be discovered through
+executions. Thus, instead of offline planning
+methods, we need
+online methods that interleave planning with action execution. Specifically, we 
+%In this work, we specifically
+focus on the online real-time planning
+setting where the robot does not have access to resets, and the
+robot has to interleave planning and execution to ensure real-time
+operation. This is similar to the classical real-time search setting
+considered by works like LRTA*~\cite{DBLP:journals/ai/Korf90},
+RTAA*~\cite{DBLP:conf/atal/KoenigL06}, RTDP~\cite{DBLP:journals/ai/BartoBS95} and
+several others. An important aspect of these approaches is that the robot can only perform a fixed amount of
+computation for planning, independent of the size of state space, before it has to execute an action.
+% This section introduces notation used throughout the
+% paper. In this work, we focus on deterministic MDPs represented by the
+% tuple $M = (\statespace, \actionspace, f, c)$, where $\statespace$ is the
+% state space, $\actionspace$ is the action space, $f: \statespace
+% \times \actionspace \rightarrow \statespace$ is the deterministic
+% dynamics, and $c: \statespace \times \actionspace \rightarrow [0, 1]$
+% is the cost function. $\gamma \in [0, 1)$ is the discount
+% factor. For the purposes of this work, we will focus on small discrete
+% action spaces, deterministic dynamics and bounded costs lying between
+% $0$ and $1$\footnote{Any bounded cost function can be scaled to fit
+%   this assumption}. 
+% A stationary policy is a deterministic decision rule that produces an
+% action based on only the current state. For any policy $\pi$, we use
+% the notation $V_M^\pi(s)$ to denote the infinite-horizon discounted
+% state value function and similarly use $Q_M^\pi(s, a)$ to denote the state-action
+% value function. We also define a $T$-step value function for a
+% positive integer $T$, $V_M^\pi(s, T)$ for any policy
+% $\pi$. Specifically, $V_M^\pi(s) = \sum_{t=1}^\infty \gamma^{t-1} c_t$
+% and $V_M^\pi(s, T) = \sum_{t=1}^T \gamma^{t-1}c_t$ where $c_1, c_2,
+% \cdots$ are the sequence of costs incurred by following the policy $\pi$ from
+% state $s$. The optimal policy is denoted using $\pi^*$ and has value
+% functions $V_M^*$ and $Q_M^*$. Due to the bounded costs, the value
+% function cannot be greater than $\frac{1}{1-\gamma}$. From Dynamic
+% Programming literature \cite{puterman2014markov}, we know that the optimal value functions
+% satisfy the Bellman optimality condition, i.e. $V_M^*(s) = \min_{a \in
+% \actionspace} c(s, a) + \gamma V_M^*(f(s, a))$ for all $s \in
+% \statespace$.
+
+% We care about the sample complexity of exploration, a metric
+% introduced in \cite{kakade2003sample}, which counts the number of timesteps
+% $t$ in which the learning algorithm\footnote{The agent acting in the
+%   MDP is guided by the learning algorithm} executes a non $\epsilon$-optimal
+% policy. Observe that any learning algorithm $\algo$ that guides the
+% agent to act based on its past state-action visitations is a
+% non-stationary policy. Consider the agent's
+% policy after we stop the algorithm at $(t-1)$ and denote it by
+% $\algo_t$. This policy has a value function $V_M^{\algo_t}(s_t)$, where
+% $s_t$ is the state at time-step $t$. We say the policy is
+% $\epsilon$-optimal if $V^{\algo_t}_M(s_t) - V^*_M(s_t) \leq
+% \epsilon$. In our online setting, the algorithm $\algo$ is run for an
+% infinite-length trajectory without any resets. The sample complexity
+% of exploration of $\algo$ is defined to be the number of timesteps $t$
+% such that the non-stationary policy at time $t$, $\algo_t$ is not
+% $\epsilon$-optimal from the current state $s_t$,
+% i.e. $V^{\algo_t}_M(s_t) > V^*_M(s_t) + \epsilon$. This definition
+% captures the efficiency of the algorithm in dealing with the
+% exploration-exploitation dilemma during online execution.
+
+\section{Problem Setup}
+\label{sec:problem-setup}
+
+Consider the problem of a robot acting to find a least-cost path to a
+goal in an environment represented
+by the tuple $M = (\statespace, \actionspace, \goalspace, f, c)$ with unknown
+deterministic dynamics $f$ and known cost function $c$. The robot
+gathers knowledge of the dynamics over a single
+trajectory in the environment, and does not have access to any
+resets, ruling out any episodic approach.
+This is an extremely challenging setting as the robot has to reason
+about whether to exploit its current knowledge of the dynamics to act
+near-optimally or to explore to gain more knowledge of the dynamics,
+possibly at the expense of suboptimality.
+
+We assume that the agent has access to an approximate model, $\hat{M} = (\statespace,
+\actionspace, \goalspace, \hat{f}, c)$, that it can use to simulate the outcome of
+its actions and use for planning. In our motivating gridworld example
+(Figure~\ref{fig:intro} right), this model
+represents a grid with no icy states, so the dynamics $\hat{f}$
+moves the robot to the next cell based on the executed
+action without any slip. However, the real environment contains
+icy states
+resulting in dynamics $f$ that differ on state-action pairs where the
+state is icy. For the remainder of this paper, we will
+refer to such state-action pairs where $f$ and $\hat{f}$ differ as ``incorrect''
+state-action pairs, and 
+%Note that the dynamics of the simulator $\hat{f}$ is a
+%good approximation of the environment dynamics $f$, but not
+%everywhere.
+use the notation $\incorrectset \subseteq
+\statespace \times \actionspace$ to denote the set of ``incorrect'' state-action
+pairs,
+i.e. $f(s, a) \neq \hat{f}(s, a)$ for all $(s, a) \in
+\incorrectset$.
+% It is important to note that we do not have any
+% knowledge of the set $\incorrectset^*$ ahead of online execution. 
+The objective is for the robot to reach a goal
+state from a given start state, despite using an inaccurate model for planning, while
+minimizing the cost incurred and ensuring real-time execution.
+
+% The intuition is that if the model $\hat{M}$ is a very good
+% approximation of the environment $M$, then we expect
+% % a policy obtained
+% % from planning in the simulator to act near-optimally in the
+% % environment during online execution. 
+% the robot to reach a goal in the environment $M$ during online
+% execution, despite using the model $\hat{M}$ for planning.
+% However, in most realistic
+% scenarios, it is rare to have a model that approximates environment dynamics very
+% well.
+% , and it is a significant challenge to
+% ensure that the robot reaches a goal in the environment with
+% differing dynamics. 
+
+\section{Approach}
+\label{sec:approach-1}
+
+Existing planning and learning approaches try to learn a very good
+approximation of $M$ from scratch 
+through online executions \cite{DBLP:journals/ml/KearnsS02, DBLP:journals/jmlr/BrafmanT02, DBLP:conf/atal/JongS07,
+  DBLP:journals/pami/DeisenrothFR15}, or update the dynamics of model
+$\hat{M}$ so that it approximates $M$ well \cite{DBLP:conf/icml/AbbeelQN06,
+  DBLP:conf/aaai/Jiang18, rastogi2018sample}.
+% In this work, we take a
+% different approach. Our main motivation is
+% that modern planning approaches
+% use forward models that are complex and in some cases, obtained from expensive
+% computation that is done offline. For example, motion planning usually
+% involves using analytical motion primitives \cite{DBLP:conf/icra/CohenCL10} that are precomputed offline and
+% are difficult to update during online execution without sacrificing
+% real-time capabilities.
+% The dynamics
+% of these forward models cannot be changed online in any arbitrary way without
+% deteriorating their performance in other scenarios and sacrificing
+% real-time capabilities. In addition, to update the model dynamics we
+% might require knowledge about the environment that we are uncertain
+% about, like the mass of the object in our pick-and-place example in
+% Figure~\ref{fig:intro} (left), which is hard to obtain.
+% In domains where we do have models that can be updated
+% efficiently online it might not be possible to model the true
+% dynamics as it can be extremely complex and could potentially take a
+% large number
+% of real world executions to learn a reasonable approximation.
+In this work, we propose an approach \textsc{Cmax} that uses
+the inaccurate model $\hat{M}$ online \emph{without} updating its dynamics, and
+is provably guaranteed to complete the task.
+% Most robotic simulations
+% are sophisticated, based on physics and have complex optimization
+% procedures to resolve contacts \cite{todorov2012mujoco}. Such
+% simulator dynamics cannot be changed in any arbitrary way without
+% deteriorating performance in other scenarios. Thus, we treat them as
+% black-boxes whose dynamics cannot be manipulated. A similar problem
+% was tackled in \cite{jiang2018pac} in the episodic
+% setting\footnote{Unlike the online setting, the agent experiences the
+%   MDP in episodes.} for small
+% state spaces. We will tackle it in the online setting considering both
+% small and large state spaces.
+In a nutshell, instead of learning a new dynamics model from scratch or
+updating the dynamics of existing model,
+% our approach
+\textsc{Cmax}
+maintains a
+running estimate of the set $\incorrectset_t$ consisting of all
+state-action pairs that have been executed and have been discovered to
+be incorrect until timestep $t$. Using the set $\incorrectset_t$, we update the cost
+function to bias the planner to plan future paths that avoid
+state-action pairs that are known to be incorrect.
+% This
+% ensures that the cost-to-go estimates obtained from planning in the
+% model are trustworthy, and the robot does not waste time and
+% computation in planning and executing state-action pairs that are known to
+% be incorrect.
+It is
+important to note that the challenge of dealing with
+exploration-exploitation dilemma online still exists, as we do not
+know the set of state-action pairs $\incorrectset$ where the dynamics differ ahead of online
+execution. A similar approach was proposed in \cite{DBLP:conf/aaai/Jiang18} for the
+episodic setting where the robot had access to resets, and for small
+state spaces where we could perform full state space planning.
+% Our approach
+\textsc{Cmax}
+extends it to the significantly more challenging 
+online real-time setting and we present a practical algorithm for
+large state spaces. 
+
+\subsection{Penalized Model}
+\label{sec:penalized-model}
+
+We formalize
+our approach
+as follows: Given a model
+$\approximateMDP$ and a set $\incorrectset \subseteq \statespace
+\times \actionspace$ consisting of state-action pairs that have been
+discovered to be incorrect so far, define the penalized model $\penalizedMDP_\incorrectset$ as:
+\begin{definition}[Penalized Model]
+  The penalized model $\penalizedMDP_\incorrectset = (\statespace,
+  \actionspace, \goalspace,
+  \hat{f}, \tilde{c}_\incorrectset)$ has the same state space,
+  action space, set of goals, and dynamics as $\approximateMDP$. The
+  cost function $\tilde{c}_\incorrectset$ though
+  is defined as $\tilde{c}_\incorrectset(s, a) = |\statespace|$ if $(s, a) \in
+  \incorrectset$, else $\tilde{c}_\incorrectset(s, a) =
+  c(s,a)$.\footnote{This is similar to the notion of penalized MDP,
+    introduced in \cite{DBLP:conf/aaai/Jiang18}}
+  % \begin{equation}
+  %   \label{eq:1}
+  %   \tilde{c}_\incorrectset(s, a) =
+  %   \begin{cases}
+  %     |\statespace| & (s, a) \in \incorrectset \\
+  %     c(s, a) & \mathsf{otherwise}
+  %   \end{cases}
+  % \end{equation}
+  % where $\vmax$ is a large value corresponding to the maximum
+  % cost-to-go of any policy that is guaranteed to reach the goal.
+  \label{def:penalized-mdp}
+\end{definition}
+
+Intuitively, the penalized model $\penalizedMDP_{\incorrectset}$
+has a very high cost for any transition where the dynamics differ,
+i.e. $(s, a) \in \incorrectset$, and
+the same cost as the model $\hat{M}$ otherwise. More specifically, the
+cost is inflated to the size of the statespace, which is the maximum
+cost of a path that visits all states\footnote{Hence, the name \textsc{Cmax} for our approach} (remember, that our cost is
+normalized to lie within $0$ and $1$.) This biases the planner to ``explore'' all other
+state-action pairs that are not yet known to be incorrect before it
+plans a path through an incorrect state-action pair.
+% Note that the
+% penalized model $\penalizedMDP_\incorrectset$ has the same dynamics as
+% the initial model $\hat{M}$.
+% Thus, by using the
+% penalized model $\penalizedMDP_\incorrectset$ for planning the robot's
+% next action we force the planner to
+% plan paths that traverse state-action space where the model $\hat{M}$ is
+% a good approximation of the environment $M$.
+In the next section, we
+will describe how we use the penalized model
+$\penalizedMDP_\incorrectset$ for real-time planning.
+%A similar notion of penalization is defined in
+%\cite{jiang2018pac} but having a different dynamics compared to the
+%simulator by terminating at any $(s, a) \in \incorrectset^*$. But we
+%cannot employ that definition in the online setting as we
+%experience the MDP in a single trajectory.
+
+% Our setting where the dynamics of the model $\hat{M}$ cannot be
+% modified can be simply thought of as the agent acting in the penalized
+% model $\penalizedMDP_{\incorrectset^*}$. However, we do not know
+% $\incorrectset^*$ before execution so the agent needs to reason about
+% exploration-exploitation. To assess the efficiency of our approach, we
+% will use the same performance metric defined in Section
+% \ref{sec:preliminaries} but with respect to the optimal policy in
+% $\penalizedMDP_{\incorrectset^*}$ rather than the environment $M$,
+% i.e. sample complexity of exploration is the number of timesteps $t$
+% where $V_{\penalizedMDP_{\incorrectset^*}}^{\algo_t}(s_t) >
+% V_{\penalizedMDP_{\incorrectset^*}}^*(s_t) + \epsilon$. Note that this is
+% still a very useful metric to measure the efficiency of our learning
+% algorithm, especially in the case where the simulator $\hat{M}$ is a
+% good approximation of the environment in large regions of state-action
+% space, i.e. $|\incorrectset^*|$ is small. In other words, we can only
+% hope to perform as optimally as the optimal policy for the penalized
+% MDP $\penalizedMDP_{\incorrectset^*}$. We will discuss more on this in
+% Section \ref{sec:discussion}.
+
+\subsection{Limited-Expansion Search for Planning}
+\label{sec:limit-expans-search}
+
+During online execution, the robot has to constantly plan the next
+action to execute from its current state in real-time. This forces the
+robot to use a fixed amount of computation for planning before it has
+to execute the best action found so far. In this work, we use
+a real-time search method that is adapted from RTAA*
+proposed by \cite{DBLP:conf/atal/KoenigL06}.
+
+\begin{algorithm}[t]
+  \caption{Limited-Expansion Search based on
+    RTAA*\cite{DBLP:conf/atal/KoenigL06}}
+  {\normalsize
+  \begin{algorithmic}[1]
+    \Function{$\mathtt{SEARCH}$}{$s,
+      \penalizedMDP_{\incorrectset}, V, K$}
+    \State Initialize $g(s) \leftarrow 0$
+    \State Initialize min-priority open list $O$, and closed list $C$
+    \State Add $s$ to open list $O$ with priority $g(s) + V(s)$
+    \For{$i=1, 2, \cdots, K$}
+    \State Pop $s_i$ from open list $O$
+    \State If $s_i \in \goalspace$, then $s_{\mathsf{best}} \leftarrow
+    s_i$ and move to Line~\ref{line:updates}
+    \For{$a \in \actionspace$} \Comment{\textit{Expanding state $s_i$}}
+    \State Get successor $s' = \hat{f}(s_i, a)$
+    \State If $s' \in C$, continue to next action
+    \If{$s' \in O$ and $g(s') > g(s_i) + \tilde{c}_\incorrectset(s_i, a)$}
+    \State Update $g(s') \leftarrow g(s_i) + \tilde{c}_\incorrectset(s_i,
+    a)$
+    \State Reorder open list $O$
+    \ElsIf{$s' \notin O$}
+    \State Set $g(s') \leftarrow g(s_i) + \tilde{c}_\incorrectset(s_i, a)$
+    \State Add $s'$ to $O$ with priority $g(s') + V(s')$
+    \EndIf
+    \EndFor
+    \State Add $s_i$ to the closed list $C$
+    \EndFor
+    \State Pop $s_{\mathsf{best}}$ from open list
+    $O$\label{line:pop-best-node}
+    \For{$s' \in C$}\label{line:updates}
+    \State Update $V(s') \leftarrow
+    g(s_{\mathsf{best}}) + V(s_{\mathsf{best}}) - g(s')$\label{line:cost-to-go-update}
+    \EndFor
+    \State Backtrack from $s_{\mathsf{best}}$ to $s$, and set
+    $a_{\mathsf{best}}$ as the first action on path from $s$ to
+    $s_{\mathsf{best}}$
+    
+    \Return{$a_{\mathsf{best}}$}
+    \EndFunction
+  \end{algorithmic}}
+  \label{alg:limited-expansion-search}
+\end{algorithm}
+
+The planner is summarized in Algorithm~\ref{alg:limited-expansion-search}. At any
+timestep $t$, given the
+current penalized model $\penalizedMDP_{\incorrectset_t}$ and the current
+state $s_t$, the planner constructs a lookahead
+search tree using at most $K$ state expansions. We obtain the successors of any
+expanded state and the cost of any state-action pair using the
+penalized model $\penalizedMDP_{\incorrectset_t}$.
+After expanding $K$
+states, it finds the best state $s_{\mathsf{best}}$ among the leaves of the search tree
+that has the least sum of cost-to-come from $s_t$ and
+cost-to-go to a goal state (line~\ref{line:pop-best-node} in Algorithm~\ref{alg:limited-expansion-search}). The best action to execute in the current
+state $s_t$ is chosen to be the first action on the path from $s_t$ to
+$s_{\mathsf{best}}$ in the search tree and the cost-to-go estimates of
+all expanded states are updated as: $V(s_{\mathsf{expanded}}) =
+g(s_{\mathsf{best}}) + V(s_{\mathsf{best}}) -
+g(s_{\mathsf{expanded}})$, where $g(s)$ is the cost-to-come from $s_t$
+for any state $s$ in the search tree.
+The amount of computation used to compute the best action for the
+current state is bounded as a factor of the number of expansions $K$ in the search
+tree. Thus, we can bound the planning time and ensure real-time
+operation for our robot.
+
+% Before presenting an algorithm for planning and execution using
+% inaccurate models for large state spaces in Section~\ref{sec:large-state-spaces}, we will first
+% present an algorithm for small discrete state spaces in the next
+% section.
+% Before presenting our algorithm for planning and execution using
+% inaccurate models, we describe the assumptions that we need
+% to establish provable guarantees of our approach in the next section.
+
+% \subsection{Assumptions}
+% \label{sec:assumptions}
+
+\subsection{Warm Up: Small State Spaces}
+\label{sec:small-state-spaces}
+
+In this section, we will present an algorithm that is applicable for
+small discrete state spaces where it is feasible to maintain cost-to-go
+estimates for all states $s \in \statespace$ using a tabular representation, and we can maintain a
+running set $\incorrectset_t$ containing all the discovered incorrect state-action pairs
+so far, without resorting to function approximation. The algorithm\footnote{A similar algorithm in the
+  episodic setting with full state space planning is presented in \cite{DBLP:conf/aaai/Jiang18}} is shown in Algorithm
+\ref{alg:small-state-spaces}.
+Intuitively, Algorithm \ref{alg:small-state-spaces} maintains a
+running set of incorrect state-action pairs
+$\incorrectset_t$, updates the set whenever it encounters an incorrect
+state-action pair, and recomputes the penalized model
+$\penalizedMDP_{\incorrectset_t}$. Crucially, the algorithm never updates the
+dynamics of the model $\approximateMDP$, and only updates the cost
+function according to Definition~\ref{def:penalized-mdp}.
+In order to prove completeness, we assume the following:
+\begin{assumption}
+  Given a penalized model $\tilde{M}_{\incorrectset_t}$ and the current
+  state $s_t$ at any timestep $t$, there always exists at least one path from $s_t$ to a goal
+  state that \textit{does not contain} any state-action pairs $(s, a)$ that are known to
+  be incorrect, i.e. $(s, a) \in \incorrectset_t$. \footnote{This
+    assumption is less restrictive than the assumption that
+    there exists at least one path from the current state to a goal
+    that does not contain any state-action pairs $(s, a)$ that are incorrect i.e. $(s,
+    a) \in \incorrectset$}
+  \label{assumption:core}
+\end{assumption}
+
+\begin{algorithm}[t]
+  \caption{\textsc{Cmax} -- Small State Spaces}
+  {\normalsize
+  \begin{algorithmic}[1]
+    \State Initialize $\approximateMDP_1 \leftarrow \approximateMDP$,
+    $\incorrectset_1 \leftarrow \{\}$, start state $s_1 \in
+    \statespace$, cost-to-go estimates $V$, number of expansions $K$,
+    $t \leftarrow 1$
+    \While{$s_t \notin \goalspace$}
+    \State Get $a_t = \mathtt{SEARCH}(s_t, \hat{M}_t, V, K)$
+    \State Execute $a_t$ in environment $M$ to get $s_{t+1} = f(s_t, a_t)$
+    \If{$s_{t+1} \neq \hat{f}(s_t, a_t)$}
+    \State Add $(s_t, a_t)$ to the set : $\incorrectset_{t+1} \leftarrow \incorrectset_t \cup
+    \{(s_t, a_t)\}$
+    \State Update the penalized model : $\approximateMDP_{t+1} \leftarrow
+    \penalizedMDP_{\incorrectset_{t+1}}$
+    \Else
+    \State $\incorrectset_{t+1} \leftarrow \incorrectset_t$,
+    $\approximateMDP_{t+1} \leftarrow \approximateMDP_t$
+    \EndIf
+    \State $t \leftarrow t + 1$
+    \EndWhile
+  \end{algorithmic}}
+  \label{alg:small-state-spaces}
+\end{algorithm}
+
+% Observe that this assumption is on both the quality of the initial
+% model $\hat{M}$ and the operation of our algorithm.
+% We would like to emphasize that this assumption
+% is less restrictive than the following assumption:
+% \begin{assumption}
+%   For any state $s \in \statespace$, there always exists at least one
+%   path from $s$ to a goal state that \textit{does not contain} any
+%   incorrect state-action pairs, i.e. $(s, a) \in \incorrectset^*$.
+%   \label{assumption:strong}
+% \end{assumption}
+
+% It is easy to see that Assumption~\ref{assumption:strong}
+% implies Assumption~\ref{assumption:core} since for any timestep $t$,
+% $\incorrectset_t \subseteq \incorrectset^*$. We will show that
+% Assumption~\ref{assumption:core} does not imply
+% Assumption~\ref{assumption:strong} through an example: Recall the
+% motivating icy gridworld from Figure~\ref{fig:intro} and consider the
+% small icy gridworld shown in Figure~\ref{fig:search}
+% (right). Assumption~\ref{assumption:strong} is clearly violated since
+% there exists no path from robot's current state to the goal that does
+% not contain any incorrect state-action pair. However,
+% Assumption~\ref{assumption:core} is not violated since the action of
+% moving right in the robot's current state is not yet discovered to be
+% incorrect. In fact, once it executes the move right action it
+% immediately reaches the goal state since the robot slips on ice and
+% moves two cells to the right. Thus, Assumption~\ref{assumption:core}
+% does not imply Assumption~\ref{assumption:strong}.
+
+% To establish
+% guarantees on completeness and performance of our algorithm, we will
+% use the less restrictive Assumption~\ref{assumption:core}.
+
+Under this assumption, we can show
+the following guarantee for
+Algorithm \ref{alg:small-state-spaces}:
+\begin{theorem}
+  Assume Assumption~\ref{assumption:core} holds then, if $\incorrectset$ denotes
+  the set consisting of all incorrect state-action
+  pairs, and the initial cost-to-go estimates used are
+  admissible and consistent, then using Algorithm~\ref{alg:small-state-spaces}
+  the robot is guaranteed to reach a goal state in at most
+  $|\statespace|^2$ timesteps. Furthermore, if we allow for $K =
+  |\statespace|$ expansions, then we can guarantee that the
+  robot will reach a goal state
+  in at most $|\statespace|(|\incorrectset|+1)$ timesteps.
+  \label{thm:small-state-spaces}
+\end{theorem}
+\begin{proof}[Proof Sketch]
+  From \cite{DBLP:conf/atal/KoenigL06} Theorem 3 and
+Assumption~\ref{assumption:core}, we have that using
+RTAA*, the robot is guaranteed to reach a goal state. Combining this
+result with the $|\statespace|^2$ upper bound on the number of timesteps it takes for LRTA*
+(which is equivalent to RTAA* with $K=1$ expansion) to reach the goal
+from \cite{DBLP:conf/aaai/KoenigS93}, we have that using Algorithm~\ref{alg:small-state-spaces} a
+robot is guaranteed to reach a goal state in at most $|\statespace|^2$
+timesteps.
+
+To prove the second part, observe that when we do $K = |\statespace|$
+expansions at any timestep $t$ in RTAA* and update the cost-to-go, we obtain the optimal
+cost-to-go $V^*$ for the penalized model
+$\tilde{M}_{\incorrectset_t}$. Once we obtain the optimal cost-to-go,
+there will be no further cost-to-go updates in subsequent timesteps
+until we either discover an incorrect state-action pair or reach the
+goal. Since the number of incorrect $(s, a)$ pairs is
+$|\incorrectset|$ and the length of the longest path is bounded
+above by $|\statespace|$, using pigeon hole principle we have
+that the robot is guaranteed to reach the goal in at most
+$|\statespace|(|\incorrectset| + 1)$ timesteps.
+\end{proof}
+% \begin{proof}
+%   Proof given in Appendix \ref{sec:proof-theor-refthm:s}.
+% \end{proof}
+% Proof of the above theorem is given in Appendix
+% \ref{sec:proof-theor-refthm:s}.
+The above
+theorem establishes that using Algorithm 
+\ref{alg:small-state-spaces}, the robot is guaranteed to reach a goal
+state under Assumption~\ref{assumption:core}. In
+practice, we observe that the number of timesteps to reach a goal has a smaller
+dependence on the size of state space than the
+worst-case bound, especially if Algorithm~\ref{alg:small-state-spaces}
+starts with cost-to-go estimates that are reasonably accurate for the
+initial model $\hat{M}$. % Similar
+% sample bounds for deterministic
+% shortest path problems when a model is learned from scratch are shown in
+% \cite{Koenig1993} and \cite{kakade2003sample}.
+
+\subsection{Large State Spaces}
+\label{sec:large-state-spaces}
+
+In large state spaces, it is infeasible to
+maintain cost-to-go estimates for all states $s \in \statespace$ using
+a tabular representation and maintain a running estimate of the set
+$\incorrectset_t$, as both
+could be very large in size. Thus,
+we will need to resort to function approximations for both
+cost-to-go estimates and the set $\incorrectset_t$.
+
+We will assume existence of a fixed distance metric $d:
+\statespace \times \statespace \rightarrow \mathbb{R}^+\cup\{0\}$, and that
+$\statespace$ is bounded under this metric.
+% , i.e. there exists a constant
+% $\deltamax$ such that for all $s, s' \in \statespace$, $d(s, s') \leq
+% \deltamax$.
+% In large state spaces, there could potentially be a
+% large number of state-action pairs where the dynamics differ between
+% the model and the real world.
+We relax the definition of $\incorrectset$ using the distance
+metric $d$ as follows: Define any state-action pair $(s, a) \in
+\incorrectset^\xi$ to be $\xi$-incorrect if $d(f(s, a), \hat{f}(s, a))
+> \xi$ where $\xi \geq  0$. We assume that there is an underlying
+path following controller that is used to execute our plan and can deal with
+discrepancies smaller than $\xi$. Thus, we allow for small
+discrepancies in our approximate model $\hat{M}$ that can be resolved
+using a low-level controller.
+
+% To show that our function approximations can generalize, we need some
+% continuity assumptions.
+% We assume that the cost function $c$ satisfies
+% lipschitz continuity, i.e. there exists a constant $\alpha \in \reals$,
+% $\alpha \geq 0$ such that for all $a \in \actionspace$ and $s, s' \in \statespace$ we have, $|c(s, a) - c(s',
+% a)| \leq \alpha d(s, s')$. We also assume lipschitz continuity in the difference of dynamics
+% between model $\approximateMDP$, and environment $M$ as follows:
+% $|d(f(s, a), \hat{f}(s, a)) - d(f(s', a), \hat{f}(s', a))| \leq \beta
+% d(s, s')$ for all $s, s' \in \statespace$ and $a \in \actionspace$,
+% where $\beta \in \reals$ and $\beta \geq 0$.
+% \anirudh{Do we need any Lipschitz assumptions on the cost function or
+%   dynamics or difference in dynamics?}
+
+% . Thus, we can
+% use definition \ref{def:penalized-mdp} with the set
+% $\incorrectset^\xi$ to define the penalized MDP
+% $\penalizedMDP_{\incorrectset^\xi}$.
+% To understand why this notion
+% captures the accuracy of the model $\approximateMDP$ in modeling
+% the environment $M$ to find the shortest path, we can show the following lemma which is a direct
+% extension of the simulation lemma from \cite{Kearns2002},
+% \begin{lemma}[Simulation Lemma]
+%   If the model $\approximateMDP$ satisfies the condition $d(f(s,
+%   a), \hat{f}(s, a)) \leq \xi$ for all $(s, a) \in \statespace \times
+%   \actionspace$, then
+%   \begin{equation}
+%     \label{eq:5}
+%     V_{M}^*(s) \leq
+%     \alpha\xi\deltamax + V_{\approximateMDP}^*(s)
+%   \end{equation}
+%   for any policy $s \in \statespace$.
+% \end{lemma}
+
+% Thus, planning in a model where the discrepancy in dynamics is
+% bounded, i.e. $d(f(s, a), \hat{f}(s, a)) \leq \xi $, results in a path
+% that is sub-optimal in a bounded fashion as given by
+% Equation~\ref{eq:5}. We will use this property to bound the
+% performance of our algorithm by appropriately maintaining a running
+% approximation of the incorrect set $\incorrectset_t^\xi$, and updating
+% the cost function according to Definition~\ref{def:penalized-mdp}.
+
+Our algorithm for  large state
+spaces is presented in Algorithm \ref{alg:large-state-spaces}. The main idea
+of the algorithm is to ``cover'' the set $\incorrectset^\xi$ using
+hyperspheres in $\statespace\times\actionspace$. Since the action
+space $\actionspace$ is a discrete set, we maintain separate sets of
+hyperspheres for each action $a \in \actionspace$. Whenever the agent encounters an incorrect
+state-action pair $(s, a) \in \incorrectset^\xi$, it places a
+hypersphere at $s$ corresponding to action $a$ whose radius (as
+measured by the metric $d$) is given
+by $\delta > 0$, a domain-dependent constant.
+% This radius is obtained by using the lipschitz continuity assumption
+% on the difference of dynamics, and ensures that any state $s'$ lying inside the
+% hypersphere centered at $s$ corresponding to action $a$ satisfies
+% either the condition $(s', a) \in \incorrectset^\xi$ or it is within a
+% distance of $\delta$ from an incorrect state-action pair.
+We inflate the cost of a
+state-action pair $(s, a)$, according to
+Definition~\ref{def:penalized-mdp},
+if $s$ lies inside any hypersphere corresponding to action $a$. In
+practice, this
+is implemented by constructing 
+separate KD-Trees in state space $\statespace$ for each action
+$a \in \actionspace$ to enable efficient lookup.
+
+After executing the action and placing a hypersphere if a discrepancy
+in dynamics
+was observed, the function approximation for cost-to-go is updated
+iteratively as follows (Line~\ref{line:iteration-start} to
+Line~\ref{line:iteration-end}): Sample a batch of states from the buffer
+of previously visited states with replacement, construct a lookahead
+tree for each state in the batch (through parallel jobs) to obtain all
+states on the closed list and their corresponding cost-to-go updates
+using Algorithm~\ref{alg:limited-expansion-search},
+and finally update the parameters of the cost-to-go function
+approximator to minimize the mean squared loss $\mathcal{L}(V_\theta, \mathbb{X}) = \frac{1}{2|\mathbb{X}|} \sum_{(s,
+    V(s)) \in \mathbb{X}} (V(s) - V_\theta(s))^2$ for all the expanded
+states through a gradient descent step (Line~\ref{line:iteration-end}).
+% \begin{equation}
+%   \label{eq:2}
+%   \mathcal{L}(V_\theta, \mathbb{X}) = \frac{1}{2|\mathbb{X}|} \sum_{(s,
+%     V(s)) \in \mathbb{X}} (V(s) - V_\theta(s))^2
+% \end{equation}
+
+Observe that, similar to Algorithm~\ref{alg:small-state-spaces}, we
+do not update the dynamics $\hat{f}$ of the model, and only update the
+cost function according to
+Definition~\ref{def:penalized-mdp}. However, unlike
+Algorithm~\ref{alg:small-state-spaces}, we do not explicitly maintain
+a set of incorrect state-action pairs but maintain it implictly
+through hyperspheres. By using hyperspheres, we obtain local
+generalization and increase the cost of all the state-action pairs
+inside a hypersphere.
+% We will also show that using hyperspheres speeds
+% up our approach as it quickly ``covers'' the $\xi$-incorrect
+% state-action region $\incorrectset^\xi$.
+In addition, unlike
+Algorithm~\ref{alg:small-state-spaces}, we update cost-to-go estimates
+of not only the expanded states in the lookahead tree obtained from
+current state $s_t$, but also from previously visited states. This
+ensures that the function approximation used for maintaining
+cost-to-go estimates does not deteriorate for states that were
+previously visited, and potentially help in generalization.
+\begin{algorithm}[t]
+  \caption{\textsc{Cmax} -- Large State Spaces}
+  {\normalsize
+  \begin{algorithmic}[1]
+    \State Initialize $\approximateMDP_1 \leftarrow \approximateMDP$,
+    Cost-to-go function approximation $V_{\theta_1}$, Set of
+    hyperspheres $\incorrectset^\xi_1 \leftarrow \{\}$, Start state
+    $s_1$, Number of planning updates $N$, Batch size $B$, Buffer
+    $\buffer$, Number of expansions $K$,
+    Learning rate $\eta$, $t \leftarrow 1$, Radius of hypersphere
+    $\delta$, Discrepancy threshold $\xi$
+    \While{$s_t \notin \goalspace$}
+    \State Get $a_t \leftarrow \mathtt{SEARCH}(s_t, \approximateMDP_t,
+    V_{\theta_{t}}, K)$
+    \State Execute $a_t$ in environment $M$ to get $s_{t+1} \leftarrow
+    f(s_t, a_t)$
+    \If{$d(s_{t+1}, \hat{f}(s_t, a_t)) > \xi$}
+    \State Add $\incorrectset_{t+1}^\xi \leftarrow
+    \incorrectset_t^\xi \cup \{\mathsf{sphere}(s_t, a_t, \delta)\}$
+    \Else
+    \State $\incorrectset_{t+1}^\xi \leftarrow \incorrectset_t^\xi$
+    \EndIf
+    \State Update $\approximateMDP_{t+1} \leftarrow
+    \tilde{M}_{\incorrectset_{t+1}^\xi}$
+    \State Add $s_t$ to buffer $\buffer$
+    \State Update $V_{\theta_{t+1}} \leftarrow
+    \mathtt{UPDATE}(s_t, \approximateMDP_{t+1}, V_{\theta_t}, \buffer)$
+    \State $t \leftarrow t + 1$
+    \EndWhile
+
+    \Function{$\mathtt{UPDATE}$}{$s, \approximateMDP, V_\theta,
+      \buffer$}
+    \For{$n=1, \cdots, N$}
+    % \State Call $\mathtt{SEARCH}(s, \approximateMDP, V_\theta, K)$ to
+    % get all states $s'$ on closed list and add them to  buffer $\buffer$
+    \State Sample batch of $B$ states $S_n$ from buffer $\buffer$
+    with replacement\label{line:iteration-start}
+    \State Call $\mathtt{SEARCH}(s_i, \hat{M}, V_\theta, K)$ for each
+    $s_i \in S_n$ to get all states on closed list $s_i'$ and their corresponding cost-to-go updates $V(s_i')$
+    and construct the training set $\mathbb{X}_n = \{(s_i', V(s_i'))\}$
+    \State Update: $\theta \leftarrow \theta - \eta\nabla_\theta
+    \mathcal{L}(V_\theta, \mathbb{X}_n)$\label{line:iteration-end}
+    \EndFor
+    \Return{$V_\theta$}
+    \EndFunction
+  \end{algorithmic}}
+\label{alg:large-state-spaces}
+\end{algorithm}
+
+We can provide a guarantee on the completeness of
+Algorithm~\ref{alg:large-state-spaces} by assuming the following: 
+\begin{assumption}
+  Given a penalized model $\penalizedMDP_{\incorrectset_t^\xi}$ and
+  the current state $s_t$ at any timestep $t$ during execution, there
+  always exists at least one path from $s_t$ to a goal state that is
+  \textit{at least $\delta$ distance away} from any state-action pair $(s, a)$ 
+  that is known to be $\xi$-incorrect, i.e. $(s, a) \in \incorrectset_t^\xi$.
+  \label{assumption:core-large}
+\end{assumption}
+
+The above assumption has two components: the first one relaxes
+Assumption~\ref{assumption:core} to accommodate the notion of
+$\xi$-incorrectness, and the second one states that, unlike
+Assumption~\ref{assumption:core}, there exists a path that not only
+does not contain any state-action pairs that are known to be
+$\xi$-incorrect, but also that any state-action pair on the path is at
+least $\delta$ distance, as measured by the metric $d$, away from any
+state-action pair that is known to be $\xi$-incorrect. The second
+component makes this assumption stronger. However, it can lead to
+substantial speedups in the time taken to reach a goal as we can place
+hyperspheres of radius $\delta$ to quickly ``cover'' the
+$\xi$-incorrect set.
+
+Algorithm~\ref{alg:large-state-spaces} employs approximate planning by
+using a function approximator for cost-to-go estimates and performing
+batch updates to fit the approximator. This is necessary as the state
+space is large, and maintaining tabular cost-to-go estimates for
+each state is expensive in memory and would take a large
+number of timesteps to update them in practice. However, for
+ease of analysis, we will assume that we do exact updates and maintain
+tabular cost-to-go estimates like
+Algorithm~\ref{alg:small-state-spaces}. Then, we can show the following
+guarantee:
+\begin{theorem}
+  Assume Assumption~\ref{assumption:core-large} holds then, if
+  $\incorrectset^\xi$ denotes the set of all
+  $\xi$-incorrect state-action pairs, and the initial cost-to-go estimates
+  are admissible and consistent, then using
+  Algorithm~\ref{alg:large-state-spaces} with exact updates
+  and tabular representation for cost-to-go estimates, the robot is
+  guaranteed to
+  reach a goal state in at most $|\statespace|^2$
+  timesteps. Furthermore, if we allow for $K = |\statespace|$ expansions,
+  then we can guarantee that the robot will
+  reach a goal state in at most
+  $|\statespace|(\covering(\delta) + 1)$ timesteps, where
+  $\covering(\delta)$ is the covering number of the set
+  $\incorrectset^\xi$.
+  \label{thm:large-state-spaces}
+\end{theorem}
+\begin{proof}[Proof Sketch]
+  The proof of the first part of the theorem is very similar to the
+proof of Theorem~\ref{thm:small-state-spaces}. It is crucial to notice
+that under Assumption~\ref{assumption:core-large}, we will always have
+a path from the current state to a goal that has no transition
+within a hypersphere. Thus, using RTAA* guarantees we have that using
+Algorithm~\ref{alg:large-state-spaces} a robot is guaranteed to reach
+a goal state in at most $|\statespace|^2$ timesteps.
+
+To prove the second part, we use a similar pigeon hole principle proof
+as Theorem~\ref{thm:small-state-spaces}. However, since we ``cover''
+the incorrect set $\incorrectset^\xi$ with hyperspheres, the number of
+times we update our heuristic to the optimal cost-to-go of the
+corresponding penalized model is equal to the covering number $\covering(\delta)$ of the
+$\incorrectset^\xi$, i.e. the number of radius $\delta$ spheres whose
+union is a superset of $\incorrectset^\xi$. Thus, with $K =
+|\statespace|$ expansions the robot is guaranteed to reach the goal in
+at most $|\statespace|(\covering(\delta) + 1)$ timesteps.
+\end{proof}
+
+The above theorem states
+that, using
+Algorithm~\ref{alg:large-state-spaces}, the robot is guaranteed to
+reach a goal state, if the initial cost-to-go estimates are admissible
+and consistent. The theorem also provides a stronger guarantee that the number of timesteps
+to the goal has a dependence on the covering
+number, if we do $|\statespace|$ number of expansions at each timestep.
+% To understand the dependence on $\delta$, if we replace the
+% limited-expansion search with A* search then we have a guarantee 
+% that the robot
+% will reach in a number of timesteps that is dependent on the
+% covering number of the set $\incorrectset^\xi$.
+Covering number
+$\covering(\delta)$ of a set $A$ is formally defined as the size of
+the set $B$ of
+state-action pairs $(s, a)$ such that $A \subseteq \bigcup_{(s, a) \in
+  B} \mathsf{sphere}(s, a, \delta)$. Note that the covering number
+$\covering(\delta)$ is
+typically much smaller than the size of the set
+$\incorrectset^\xi$. Although performing $|\statespace|$ expansions at
+each timestep is infeasible in large state spaces with real-time
+constraints, it is useful to note that we achieve speedup from adding
+hyperspheres of radius $\delta$. Importantly, the efficiency
+of the Algorithm~\ref{alg:large-state-spaces} degrades gracefully with
+decreasing $\delta$ and reduces to the bound presented in
+Theorem~\ref{thm:small-state-spaces}, if only
+Assumption~\ref{assumption:core} holds. Similar to the
+worst-case bounds presented in Theorem~\ref{thm:small-state-spaces},
+the number of timesteps it takes for the robot to reach a goal state,
+in practice as shown in our experiments, has a much smaller dependence on size of state space if
+we start with cost-to-go estimates that are reasonably accurate for
+the initial model $\hat{M}$, and use cost-to-go
+function approximation as we do in
+Algorithm~\ref{alg:large-state-spaces}.
+
+\section{Experiments}
+\label{sec:experiments}
+
+We test the applicability and efficiency of our approach \textsc{Cmax} on a
+range of robotic tasks across simulation and real-world
+experiments.\footnote{Code to reproduce simulated
+experiments can be found at
+\url{https://github.com/vvanirudh/CMAX}}
+% We also vary the sizes of state space across these tasks 
+% emphasizing the performance of our approach in both small and large
+% (and continuous) state spaces.
+In simulated experiments, we record the
+mean and standard error for the number of timesteps taken by the
+robot to reach the goal emphasizing the performance of
+% our approach.
+\textsc{Cmax}. For physical robot experiments, we present
+real-time execution statistics of \textsc{Cmax}. The video of our
+physical robot experiments can be found at 
+\url{https://youtu.be/eQmAeWIhjO8}.
+
+
+\subsection{Simulated 4D Planar Pushing in the Presence of Obstacles}
+\label{sec:simulated-4d-planar}
+% \anirudh{Show figures of the planar pushing environment with and
+% without an obstacle; define the problem - push object to goal with
+% least cost incurred; continuous 4D state space and simple action space;
+% large state space algorithm; define metric used and beta value used
+% (and delta); Internal model has no obstacle, real world has obstacle}
+% \anirudh{Baselines will be Eps-greedy exploration, Model-free Qlearning (deep), Model-based planning
+% (where a model is learned online and only this model is used for
+% planning - simulator is only used offline to warmstart the learned
+% model)}
+% \anirudh{Metric to compare approaches is again the cost incurred in
+% reaching the goal online across 100 randomly generated start-goal
+% pairs in the obstacle world.}
+% \anirudh{Present data on the offline planning done in the simulator
+% for all approaches; present their performance in the empty world
+% before their online execution; Enforce that none of the approaches
+% have any unfair advantage over others}
+% \anirudh{Show a figure of the learned value function keeping the
+% object pose fixed and placing a heatmap on the 2D table as the
+% gripper position is varied on the table.}
+
+% \begin{figure}[t]
+%   \centering
+%   % \begin{subfigure}{0.4\linewidth}
+%   %   \includegraphics[width=\linewidth]{figures/cmax/fetch_empty.png}  
+%   % \end{subfigure}
+%   %\begin{subfigure}{0.4\linewidth}
+%  \includegraphics[width=0.4\linewidth]{figures/cmax/fetch.png}
+%   %\end{subfigure}
+%   \caption{4D Planar Pushing in the presence of obstacles. The task
+%     is to push the black box to the red goal using the end-effector.}
+%   \label{fig:simulation}
+% \end{figure}
+
+In this experiment, the task is for a robotic gripper to push a cube
+from a start location to a goal location in the presence of
+static obstacles without any resets, as shown in
+Figure~\ref{fig:search} (right). This can be represented as a
+planning problem in 4D continuous state space $\statespace$ with any state represented as
+the tuple $s = (g_x,
+g_y, o_x, o_y)$ where $(g_x, g_y)$ are the xy-coordinates of the
+gripper and $(o_x, o_y)$ are the xy-coordinates of the object. The
+model $\hat{M}$ used for planning \textit{does not} have the static obstacles and the
+robot can only discover the state-action pairs that are affected due
+to the obstacles through real world executions. The
+action space $\actionspace$ is a discrete set of 4 actions that move
+the gripper end-effector in the 4 cardinal directions by a fixed
+offset using an IK-based controller. The cost of each transition is
+$1$ when the object is not at the goal location, and $0$
+otherwise.
+
+\begin{table}[t]
+  \centering
+  \begin{tabular}{|c|c|c|c|c|}
+    \hline
+    & \multicolumn{2}{c|}{\textbf{Accurate Model}} &
+                                                               \multicolumn{2}{c|}{\textbf{Inaccurate
+                                                               Model}}
+    \\
+    \cline{2-5}
+    & \textbf{Steps} & \textbf{\% Success} &
+                                                    \textbf{Steps}
+                          & \textbf{\% Success} \\
+    \hline
+    \textsc{Cmax} & $63 \pm 22$ & $90\%$ & $192 \pm 40$& $ 80\%$ \\
+    \hline
+    Q-Learning & $34 \pm 5$ & $90\%$ & $441 \pm 100$ & $45\%$\\
+    \hline
+    Model NN & $62 \pm 26 $&$90\%$&  $348 \pm 82$&$ 15\%$\\
+    \hline
+    Model KNN & $106 \pm 34 $&$95\%$& $533 \pm 118 $&$50\%$\\
+    \hline
+    \hline
+    Plan with Accurate Model & $63 \pm 22 $&$90\%$ & $364 \pm 53 $&$85\%$\\
+    \hline
+  \end{tabular}
+  \caption{Results for the simulated 4D planar pushing task. First
+    column corresponds to the case when the environment has no
+    obstacles, and the model is accurate. Second column corresponds to
+    when the environment has static obstacles. and model (with no obstacles) is
+    inaccurate. Each entry in the Steps subcolumn is obtained using $20$
+    random start and goal locations, and we present mean and standard
+    error of number of timesteps it takes the robot to reach the
+    goal \textit{among successful trials}. The \% success subcolumn
+    indicates percentage of successful trials where the robot reached the goal in less
+    than 1000 timesteps. The last row corresponds to using the planner
+  with an accurate model (the same as the environment.)}
+\label{tab:fetch}
+
+\end{table}
+
+We compare \textsc{Cmax} with
+the following baselines: a
+model-free Q-learning approach
+\cite{DBLP:journals/nature/MnihKSRVBGRFOPB15} that learns from
+online executions in environment
+and does not use the model $\hat{M}$, and a model learning approach that uses
+limited-expansion search for planning but updates a learned residual that
+compensates for the discrepancy in dynamics between the model and
+environment. The model learning approach is very similar to previous works
+that learn residual dynamics models and have been shown to work well in
+episodic settings \cite{rastogi2018sample, DBLP:conf/icra/HaY15,
+  DBLP:conf/iros/SaverianoYFL17}. We chose two function
+approximators for the learned residual dynamics to account for
+model learning approaches that use global function
+approximators such as neural networks (NN)
+\cite{DBLP:conf/nips/JannerFZL19}, and local function approximators
+such as K-nearest neighbor regression (KNN)
+\cite{DBLP:conf/nips/NouriL08, DBLP:conf/atal/JongS07}. Finally, we compare against
+a limited-expansion search planner that uses an accurate model with
+the full knowledge about
+obstacles to understand the
+difficulty of the task. Specific details on the architecture and baseline
+parameters can be found in our original paper~\cite{cmax}.
+
+For our implementation, we follow Algorithm~\ref{alg:large-state-spaces}
+with euclidean distance metric, $\xi = 0.01$, and $\delta =
+0.02$. These values are chosen to capture the discrepancies observed
+in the object and gripper position when pushed into an obstacle, and the size of
+the obstacles. We use the same values for the model learning KNN
+baseline to ensure a fair comparison. The results of our experiments are
+presented in Table~\ref{tab:fetch}. We notice that all the approaches
+have almost the same performance when both model and environment have
+no obstacles (first column). This validates that all the baselines
+do well when the model is accurate. However, when the model is
+inaccurate (second column), the performance varies across baselines.
+Q-learning performs decently well since it relies on the model only
+for the initialized Q-values and not during online executions, but as
+the task is now more difficult, it solves much fewer trials and is
+highly suboptimal. It is
+interesting to see that model learning baselines do 
+not do as well as one would expect. This can be attributed to the
+number of online executions required to learn the correct residual,
+which can be prohibitively large. Among 
+the two model learning baselines, KNN works better since it requires
+fewer samples to learn the residual, while NN requires large amounts of
+data. In contrast, \textsc{Cmax} does not seek to learn the true
+dynamics and instead is more focused on reaching the goal
+quickly. When compared with a planner that uses the accurate model with
+obstacles and solves $17$ trials (last row in Table~\ref{tab:fetch}),
+our approach solves $16$ trials and achieves the lowest mean 
+number of timesteps to reach the goal among all baselines.
+We would like to note that the planner with accurate model takes a larger number of timesteps because
+we used the same initial cost-to-go estimates as other approaches.
+The initial cost-to-go estimates are more accurate for the model
+with no obstacles than for the model with obstacles. Hence, it spends a
+larger number of timesteps updating cost-to-go estimates.
+% which are not near-optimal for the model with obstacles, but for the model
+% with no obstacles.
+This experiment shows that by focusing on reaching the goal and not
+trying to correct the model 
+dynamics, \textsc{Cmax} performs the best and solves the most number of
+trials among baselines.
+
+\begin{figure}[t]
+  \centering
+  % \begin{subfigure}{0.3\linewidth}
+  %   \includegraphics[width=\linewidth]{figures/cmax/search.pdf}
+  % \end{subfigure}
+  % \hspace{10mm}
+  % \begin{subfigure}{0.25\linewidth}
+  %   \includegraphics[width=\linewidth]{figures/cmax/example.pdf}
+  % \end{subfigure}
+  {
+  \begin{subfigure}{0.1\linewidth}
+    \begin{tabular}{|c|c|c|}
+      \hline
+      & \textbf{Steps} & \textbf{\% Success} \\
+      \hline
+      \textbf{\textsc{Cmax}} & $47 \pm 6$&$ 100\%$ \\
+      \hline
+      \textbf{RTAA*} & $138 \pm 65 $&$ 30\%$ \\
+      \hline
+    \end{tabular}
+  \end{subfigure}}
+  \hspace{60mm}
+  \begin{subfigure}{0.3\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/fetch.png}
+  \end{subfigure}
+  \caption{(left) Results for simulated 7D arm planning experiment
+    comparing RTAA* and \textsc{Cmax}. Each entry in the Steps column is obtained using 10
+    trials with
+    random start configurations and goal locations, and we present
+    mean and standard error of number of timesteps it takes the arm to
+    reach the goal \textit{among successful trials}. The \% success column
+    indicates percentage of successful trials where the arm reached the
+    goal in less than $300$ timesteps.(right)
+    4D Planar Pushing in the presence of obstacles. The task
+    is to push the black box to the red goal using the end-effector.}
+  \label{fig:search}
+  
+\end{figure}
+
+% \subsection{Simulated 7D Arm Planning with a Broken Joint}
+% \label{sec:simulated-7d-arm}
+
+% While the previous experiment tested our approach against popular
+% baselines, this experiment is designed to evaluate the relative
+% importance of the parameters involved in our algorithm. The task is to
+% move a simulated 7D PR2 arm with a broken joint from a start
+% configuration so that the end-effector reaches a desired 3D goal
+% region without any resets, as shown in Figure~\ref{fig:simulation}(right). This can be represented as a
+% planning problem in 7D discrete state space $\statespace$ where each
+% dimension corresponds to a joint of the arm bounded by the joint
+% limits. In this experiment, we discretize each dimension into $10$ bins and plan in the
+% resulting discrete state space of size $10^7$. The action space
+% $\actionspace$ is a discrete set of size $14$ corresponding to moving
+% each joint by a fixed offset in the positive or negative direction. We
+% use an IK-based controller to navigate between states. The model
+% $\hat{M}$ used for planning \textit{does not} know that a joint is
+% broken and assumes that the arm can be moved to any configuration
+% within the joint limits. In the real world, if the robot tries to move
+% the broken joint, the arm does not move. Thus, the robot realizes the
+% unattainable configurations only through real world executions. The
+% cost of each transition is the distance of end-effector from the goal
+% region. Since planning in 7D can be computationally expensive and
+% potentially take a long time, we use a weighted version of
+% limited-expansion search proposed in
+% \cite{DBLP:journals/ai/RiveraBH15} which simply modifies the
+% cost-to-go update as $V(s') \leftarrow w(g(s_{\mathsf{best}}) - g(s'))
+% + V(s_{\mathsf{best}})$, where $w \geq 1$ is a constant weight. It has been
+% empirically shown that using the weighted update results in speedup in
+% time taken to reach the goal. We use the weighted update with a weight
+% of $w = 32$ in this experiment.
+
+% We vary two parameters of Algorithm~\ref{alg:large-state-spaces} with
+% the manhattan distance metric:
+% discrepancy threshold $\xi$, and radius of the hyperspheres
+% $\delta$. The aim of this experiment is to understand the effect of
+% these parameters on the performance of our approach. In addition to
+% this, we also measure the effectiveness of function approximation used
+% for cost-to-go updates in comparison to exact updates like the ones
+% performed by Algorithm~\ref{alg:small-state-spaces}, RTAA*, and other
+% real-time search methods. For this experiment, we use a RBF kernel
+% regressor with L2 regularization for the function approximation of
+% cost-to-go estimates, and all trials start with the same initial
+% cost-to-go estimates. The results of our experiments are presented in
+% \anirudh{present and discuss results}.
+
+\subsection{3D Pick-and-Place with a Heavy Object}
+\label{sec:real-world-3d}
+
+\begin{figure*}[t]
+  \centering
+  \begin{subfigure}{0.13\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_pick_place_light_1_annotated.jpeg}
+  \end{subfigure}
+  \begin{subfigure}{0.13\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_pick_place_light_2_annotated.jpeg}
+  \end{subfigure}
+  \begin{subfigure}{0.13\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_pick_place_light_3_annotated.jpeg}
+  \end{subfigure}
+  \begin{subfigure}{0.13\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_pick_place_heavy_1_annotated.jpeg}
+  \end{subfigure}
+  \begin{subfigure}{0.13\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_pick_place_heavy_2_annotated.jpeg}
+  \end{subfigure}
+  \begin{subfigure}{0.13\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_pick_place_heavy_3_annotated.jpeg}
+  \end{subfigure}
+  \begin{subfigure}{0.13\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_pick_place_rviz_cropped_annotated.jpeg}
+  \end{subfigure}
+  \caption{Physical robot 3D pick-and-place experiment. The task is to
+    pick the object (light - wooden block, heavy - black dumbbell) and
+    place it at the goal location (green) while avoiding the obstacle
+    (box). For the light object (first 3 images), the model dynamics are accurate and
+    the robot takes it on the optimal path that goes above the
+    obstacle. For the heavy object (next 3 images), the model dynamics are
+    inaccurate but using \textsc{Cmax} the robot discovers that there
+    is a discrepancy in dynamics when the object is lifted beyond a
+    certain height (due to joint torque limits), adds hyperspheres at
+    that height to
+    account for these transitions (red spheres in the last image), and quickly finds an
+    alternate path going behind the obstacle.}
+  \label{fig:real-3d}
+  
+\end{figure*}
+
+The task of this physical robot experiment (Figure~\ref{fig:real-3d}) is to pick and place a heavy 
+object using a PR2 arm from a start pick location to a goal place
+location while avoiding an obstacle. This can be represented as a
+planning problem in 3D discrete state space $\statespace$ where
+each state corresponds to the 3D location of the end-effector.
+% In our
+% experiment, we discretize each dimension into $20$ bins and plan in
+% the resulting discrete state space of size $20^3$.
+Since it is a
+relatively small state space, we use exact planning updates without
+any function approximation following
+Algorithm~\ref{alg:small-state-spaces} with $K=3$ expansions.
+The action space is a
+discrete set of $6$ actions corresponding to a fixed offset movement
+in positive or negative direction along each dimension.
+% We use a
+% RRT-based motion planner \cite{DBLP:journals/ijrr/LaValleK01} to plan the path of the
+% arm between states, while avoiding collision with the obstacle.
+The
+model $\hat{M}$ used by planning \textit{does not} model the object as
+heavy and hence, does not capture the dynamics of the arm correctly when it
+holds the heavy object. Specific details regarding the experiment can
+be found in our original paper~\cite{cmax}.
+% The cost of each transition is $1$ if 
+% object is not at the goal place location, otherwise it is $0$.
+
+We observe that if the object was not heavy, then the arm takes the
+object from the start pick location to the goal place location on the
+optimal path which goes above the obstacle (first 3 images of
+Figure~\ref{fig:real-3d}). However, when executed
+with a heavy object, the arm cannot lift the object beyond a certain
+height as its joint torque limits are reached. At this point, the robot notes the
+discrepancy in dynamics between the model $\hat{M}$ and the real world,
+and inflates the cost of any executed transition that tried to move the object
+higher. Subsequently, the robot figures out
+an alternate path that does not require it to lift the object higher
+by taking the object behind the obstacle to the goal place
+location (last 4 images of Figure~\ref{fig:real-3d}). The robot takes
+36 timesteps (25.8 seconds) to reach
+the goal with the heavy object, in comparison to 26 timesteps (22.8 seconds) for the
+light object (see video). Thus, the robot using \textsc{Cmax} successfully completes the task despite having a
+model with inaccurate dynamics.
+
+\subsection{7D Arm Planning with a Non-Operational Joint}
+\label{sec:real-world-7d}
+
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}{0.3\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_place_initial.png}
+  \end{subfigure}
+  \begin{subfigure}{0.3\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_place_working_final_annotated_thicker.jpg}
+  \end{subfigure}
+  \begin{subfigure}{0.3\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/pr2_place_broken_final_annotated_thicker.jpg}
+  \end{subfigure}
+  \caption{Physical robot 7D arm planning experiment. The task is to start
+  from a fixed configuration (shown in the first image) and move the
+  arm so that the end-effector reaches the object place location
+  (green). When the shoulder lift joint is operational, the robot uses
+  the joint to quickly find a path to the goal (middle image). However, when the
+  joint is non-operational, it encounters discrepancies in its model
+  and compensates by finding a path that uses other joints to reach
+  the goal (last image.)}
+  %In the first 3 images, all joints are
+% working and the robot finds a path that uses the shoulder lift joint
+% to decrease the height of the end-effector and reach the goal
+% region. However, in the last 3 images, the shoulder lift joint is
+% broken and the robot discovers that any action that tries to move that
+% joint results in a discrepancy in dynamics resulting in a path that
+% uses other joints such as shoulder pan joint and elbow flex joint to
+% decrease the height of the end-effector and still reach the goal
+% region successfully.}
+\label{fig:real-7d}
+
+\end{figure}
+
+The task of this physical robot experiment (Figure~\ref{fig:real-7d}) is
+to move the PR2 arm with a
+non-operational joint from a start configuration so that the
+end-effector reaches a goal location, specified as a 3D
+region. We represent this as a planning problem in 7D
+discrete statespace $\statespace$ where each dimension corresponds to
+a joint of the arm bounded by its joint limits. The action space
+$\actionspace$ is a discrete set of size 
+$14$ corresponding to moving each joint by a fixed offset in the
+positive or negative direction. The model $\hat{M}$ used for
+planning \textit{does not} know that a joint is non-operational and
+assumes that the arm can attain any configuration within the joint
+limits. In the real world, if the robot tries to move the
+non-operational joint, the arm does not move. Specific details regarding the experiment can
+be found in our original paper~\cite{cmax}.
+% We use a
+% weighted version of
+% limited-expansion search proposed in
+% \cite{DBLP:journals/ai/RiveraBH15} which modifies the
+% cost-to-go update as $V(s') \leftarrow w(g(s_{\mathsf{best}}) - g(s'))
+% + V(s_{\mathsf{best}})$, where $w \geq 1$ is a constant weight. It has been
+% empirically shown that using the weighted update results in a speedup in
+% time taken to reach the goal.
+
+For the purpose of this
+experiment since the state space is very large, we follow Algorithm~\ref{alg:large-state-spaces} with $\delta
+= 1$, $\xi = 1$, and make the shoulder lift joint (marked by red cross and arrows
+in last image of Figure~\ref{fig:real-7d}) of PR2 non-operational. We use a
+kernel regressor with RBF kernel of length scale $\gamma = 10$ for
+the cost-to-go function approximation. Figure~\ref{fig:real-7d} shows \textsc{Cmax} operating in the
+real world to place an object at a desired location with a goal
+tolerance of $10$ cm. When the shoulder lift joint is operational, the robot finds a
+path quickly to the place location by using the joint (middle image of
+Figure~\ref{fig:real-7d}). However, when the shoulder lift joint is
+non-operational, the robot notes discrepancy in dynamics whenever it tries to
+move the joint, places hyperspheres in 7D to inflate the cost, and
+comes up with an alternate path (last image of
+Figure~\ref{fig:real-7d}) to reach the place location. The 
+robot takes $13$ timesteps (32.4 seconds) to reach the goal location with the
+non-operational joint, in comparison to $10$ timesteps (25.8 seconds) for the case
+where the joint is working (see video). Thus,
+the robot successfully finds a path to the place location despite using a
+model with inaccurate dynamics.
+
+To emphasize the need for cost-to-go function approximation and
+local generalization from hyperspheres in large state spaces, we compared \textsc{Cmax}
+against RTAA*, an exact planning method that uses a tabular
+representation for cost-to-go estimates and updates model dynamics
+online. Results are presented in 
+Figure~\ref{fig:search} (left) and show that RTAA* fails to solve $7$
+of the $10$ trials whereas \textsc{Cmax} solves all of them, and in
+smaller mean number of timesteps.
+
+%\subsection{Simulated 7D Arm Planning with a Non-Operational Joint}
+%\label{sec:simulated-7d-arm-2}
+
+\subsection{Effect of Function Approximation and Size of Hyperspheres}
+\label{sec:underst-effect-funct}
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}{0.4\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/gamma.pdf}
+  \end{subfigure}
+  \hspace{10mm}
+  \begin{subfigure}{0.4\linewidth}
+    \includegraphics[width=\linewidth]{figures/cmax/radius.pdf}
+  \end{subfigure}
+  \caption{(left) Performance of \textsc{Cmax} for 7D arm planning as
+    the smoothness of the cost-to-go function approximator varies. The plot is
+    generated for each value of length scale $\gamma$ by generating
+    $10$ random start configurations and goal locations, and running
+    our approach for a maximum of $100$ timesteps. (right) Performance
+    of our approach for 4D planar pushing as the radius of the
+    hypersphere $\delta$ varies. The plot is generated for each value
+    of radius $\delta$ by generating $10$ random start and goal
+    locations, and running \textsc{Cmax} for a maximum of $400$ timesteps.}
+  \label{fig:gamma-radius}
+  
+\end{figure}
+
+While previous experiments have tested \textsc{Cmax} against other
+baselines and on a physical robot, this experiment is designed to
+evaluate the effect of cost-to-go function approximation and the size
+of hyperspheres on the
+performance of \textsc{Cmax} in large state spaces (Algorithm~\ref{alg:large-state-spaces}.)
+For the first set of experiments (Figure~\ref{fig:gamma-radius} left), we use the setup of
+Section~\ref{sec:real-world-7d} and focus on varying the smoothness of the kernel
+regressor cost-to-go function approximation
+by varying the length scale $\gamma$ of the RBF kernel.
+Intuitively, small length scales result in approximation with high
+variance, and for large scales we obtain highly smooth approximation.
+% For small length
+% scales, the resulting approximation has very high variance and 
+% resembles the behavior of maintaining a tabular representation for
+% cost-to-go estimates (like Algorithm~\ref{alg:small-state-spaces}), and for large length scales the resulting
+% approximation is highly smooth and could potentially fail at distinguishing
+% the relative importance of nearby states.
+% We record the number of timesteps over 10 random start
+% configurations and goal locations as we vary the length scale
+% $\gamma$.
+We notice that for small $\gamma$, the performance is poor and
+as $\gamma$ increases, the performance of \textsc{Cmax}
+becomes better as it can generalize the cost-to-go estimates
+in the state space. However, for large $\gamma$ the performance
+deteriorates as it fails to capture the difference in cost-to-go
+values among nearby states due to excessive smoothing. This showcases
+the need for generalization in cost-to-go
+estimates for efficient updates in large state spaces.
+
+For the second set of experiments (Figure~\ref{fig:gamma-radius}
+right), we vary the radius of the 
+hyperspheres $\delta$ introduced whenever an incorrect
+state-action pair is discovered in
+Algorithm~\ref{alg:large-state-spaces}. We use the setup of
+Section~\ref{sec:simulated-4d-planar}, vary 
+$\delta$ and observe the number of timesteps it takes the robot to
+push the object to the goal. We observe that when $\delta$ is
+large, the performance is poor as we potentially penalize state-action
+pairs that are not incorrect and could result in a very suboptimal
+path. However, a very small $\delta$ can also lead to a poor
+performance, as we need more online executions to discover the set of
+incorrect state-action pairs. Hence, the radius $\delta$ needs to be
+chosen carefully to quickly ``cover'' the incorrect set, while not
+penalizing any correct state-action pairs.
+
+\subsection{Simulated 2D Gridworld Navigation with Icy States}
+\label{sec:simul-2d-gridw}
+
+% \begin{table}[t]
+%   \centering
+%   \begin{tabular}{|c|c|c|c|}
+%     \hline
+%     \textbf{\% obstacles}& \textbf{0\%} & \textbf{40\%}
+%     &\textbf{80\%} \\
+%     \hline
+%     \textbf{Our Approach} & $78 \pm 4 $  & $1551
+%                                                                 \pm
+%                                                                 373
+%                                                                 $
+%     & $138 \pm 10 $ \\
+%     \hline
+%     \textbf{Adaptive} & $78 \pm 4 $  &
+%                                                                   $1015
+%                                                                   \pm
+%                                                                   230
+%                                                                   $
+%      & $137 \pm 10 $ \\
+%     \hline
+%     \textbf{Q-Learning} & $3879 \pm 305 $ 
+%                                                              &
+%                                                                $11803
+%                                                                \pm
+%                                                                2542
+%                                                                $
+%      & $510 \pm 36 $ \\
+%     \hline
+%     % \textbf{Eps-Greedy} & $90 \pm 5 $  & $4311
+%     %                                                           \pm
+%     %                                                           1941
+%     %                                                           (18)$
+%     % & $12405 \pm 2362 (45)$\\
+%     % \hline
+%   \end{tabular}
+%   \caption{Results for gridworld navigation in presence of
+%     obstacles for a grid of size $100 \times 100$. Each entry is obtained using 50 random seeds and we
+%     present the mean and standard error of the number of timesteps it
+%     takes the robot to reach the goal.
+%     % Numbers in parenthesis indicate
+%   % the number of trials among the 50 trials where the robot reached the goal in less than
+%   % $100000$ timesteps.
+% }
+%   \label{tab:obstacle}
+% \end{table}
+
+\begin{table}[t]
+  \centering
+  \begin{tabular}{|c|c|c|c|}
+    \hline
+    \textbf{\% Ice} $\rightarrow$& \textbf{0\%} & \textbf{40\%}
+    & \textbf{80\%} \\
+    \hline
+    \textsc{Cmax} & $78 \pm 4 $ & $231
+                                                                \pm
+                                                                18
+                                                                $
+    & $2869 \pm 331 $ \\
+    \hline
+    RTAA* & $78 \pm 4 $  &
+                                                                  $219
+                                                                  \pm
+                                                                  18
+                                                                  $
+    & $2185 \pm 249 $ \\
+    \hline
+    Q-Learning & $3914 \pm 303 $ &
+                                                               $1220
+                                                               \pm
+                                                               103
+                                                               $
+    & $996 \pm 108 $ \\
+    \hline
+    % \textbf{Eps-Greedy} & $89 \pm 53 $ & $7814
+    %                                                           \pm
+    %                                                           2600
+    %                                                           (42/50)$
+    % & $3177 \pm 1700 (5/50)$\\
+    % \hline
+  \end{tabular}
+  \caption{Results for gridworld navigation in presence of
+    icy states for a grid of size $100 \times 100$. Each entry is obtained using 50 random seeds, and we
+    present the mean and standard error of the number of timesteps it
+    takes the robot to reach the goal. The columns represent the
+    percentage of icy states in the gridworld.
+    % Numbers in parenthesis indicate
+  % the number of trials where the robot reached the goal in less than
+  % $100000$ timesteps.
+}
+\label{tab:icy}
+\end{table}
+
+In our final experiment, we want to understand the performance of \textsc{Cmax}
+compared to other baselines in small domains where model dynamics
+can be represented using a table, and can be updated efficiently.
+We consider the 2D gridworld such
+as the one shown in Figure~\ref{fig:intro}(right) with icy
+states where the robot slips (moving left or right on ice moves the
+robot by two cells.) The model used for planning
+\textit{does not} contain ice, and is an
+empty gridworld.
+% Random gridworlds with ice
+% of size $100 \times 100$ are generated, with random start and goal
+% locations for the robot, and we compare \textsc{Cmax}
+% (Algorithm~\ref{alg:small-state-spaces}) with the following baselines:
+% Adaptive RTAA*, and Q-learning, a model-free baseline that learns solely
+% from online executions.
+% and Eps-greedy, an approach that executes
+% random actions with small probability and executes the best action
+% predicted by limited-expansion planner otherwise.
+The results are
+presented in Table~\ref{tab:icy}. We can observe that model-free approaches like
+Q-learning perform well compared to model-based approaches in cases where the model available is
+highly inaccurate (see Table~\ref{tab:icy} last column.) However, when
+the model is reasonably accurate
+RTAA* performs the best. But the
+results show that even in domains where model 
+dynamics are simple and can be updated efficiently, \textsc{Cmax} competes closely
+with RTAA*. Thus, our approach is still applicable in such
+domains and is relatively easier to implement.
+
+\section{Related Work}
+\label{sec:related-work}
+
+The proposed approach has components concerning real-time heuristic
+search, local function approximation methods, and dealing with
+inaccuracy in models. There is a wide array of existing work at the
+intersection of planning and learning that deal with these
+topics. Notably, we leverage prior 
+work on real-time heuristic search \cite{DBLP:journals/ai/Korf90,
+  DBLP:conf/atal/KoenigL06} for the limited-expansion search-based
+planner presented in
+Algorithm~\ref{alg:limited-expansion-search}. Using local function
+approximation methods in
+robotics has been heavily explored in seminal works \cite{
+DBLP:conf/icml/VijayakumarS00, DBLP:conf/icra/AtkesonS97} due to their smaller sample complexity
+requirements and local generalization properties that do not cause
+interference \cite{DBLP:journals/air/AtkesonMS97a,
+  DBLP:conf/icml/CoatesAN08}. More recently,
+\cite{DBLP:conf/atal/JongS07}, 
+\cite{DBLP:conf/nips/NouriL08} and \cite{DBLP:journals/ml/BernsteinS10} have also proposed approaches that
+learn local models from online executions. However unlike \textsc{Cmax},
+they use these models to approximate the dynamics of the real world. Our work is also closely related to
+the field of real-time reinforcement learning that tackles the problem
+of acting near-optimally in unknown environments, without any resets~\cite{DBLP:journals/sigart/Sutton91, DBLP:journals/ai/BartoBS95, DBLP:conf/aaai/KoenigS93}. The analysis presented in
+Theorem~\ref{thm:small-state-spaces} and \ref{thm:large-state-spaces} borrows several useful results
+from \cite{DBLP:conf/aaai/KoenigS93}. Prior
+works in model-based reinforcement learning with provable guarantees,
+such as \cite{DBLP:journals/ml/KearnsS02, DBLP:journals/ml/BernsteinS10,
+  DBLP:journals/jmlr/BrafmanT02, DBLP:conf/icml/KakadeKL03}, are also
+related. However, these works learn the true
+dynamics by updating the model and give sample complexity results in
+the finite-horizon setting or discounted infinite-horizon setting,
+unlike our shortest path setting. Among these works,
+\cite{DBLP:conf/icml/KakadeKL03}, which proposes a method for exploration in metric
+state spaces, serves as an inspiration for the covering number
+bounds given in
+Theorem~\ref{thm:large-state-spaces}. The work that is most closely
+related to ours is \cite{DBLP:conf/aaai/Jiang18}
+which proposed an approach that uses a similar idea of updating the cost
+function, in cases where updating the model dynamics is infeasible. However, their
+approach is suitable only for episodic settings and small state
+spaces. Concurrent work by \cite{DBLP:journals/ral/McConachiePMB20}
+employs a binary classifier trained on offline data to predict whether
+a transition is incorrect or correct, that is then queried during
+online motion planning to construct the search tree consisting of only
+transitions that are classified as correct.
+% We
+% extend it to the challenging online real-time setting and provide an
+% algorithm for large state spaces. 
+
+\section{Discussion and Conclusion}
+\label{sec:discussion}
+\textsc{Cmax} is the first approach for interleaving planning and
+execution that does not require updating 
+dynamics, and is guaranteed to reach the goal despite
+using an inaccurate dynamical model.
+The biggest advantage of \textsc{Cmax} is
+that it does not rely on any knowledge of how the model is inaccurate, and
+whether it can be updated in real-time.
+% whether the model dynamics can be updated in
+% real-time, or knowledge of how the model is inaccurate and ways to
+% correct it.
+Hence, it
+is broadly applicable in real world robotic tasks with complex inaccurate
+models.
+In domains where modeling the true dynamics is
+intractable, such as deformable manipulation, \textsc{Cmax} can still
+be employed to ensure successful execution.
+% In our experiments, we have tested on several
+% high-dimensional robotic tasks ranging from 4D planar pushing to
+% 3D pick-and-place to 7D arm planning, which shows the versatility of
+% \textsc{Cmax}.
+In comparison, approaches that update the model dynamics
+online rely on the flexibility of the model to be updated, knowledge
+of what is lacking in the model, and a large number of online
+executions to correct it. For example, to learn accurate dynamics for a transition
+in $N$-D statespace we need at least $N$ samples in the worst case,
+whereas our approach needs only $1$ sample to observe a discrepancy
+and inflate the cost. The most important shortcomings of \textsc{Cmax}
+are
+Assumptions~\ref{assumption:core} and \ref{assumption:core-large},
+which are hard to verify, and are not satisfied in several real world
+robotic
+tasks. For
+example, consider the task of opening a spring-loaded door 
+which is not modeled as loaded. All transitions would have discrepancy in
+dynamics, and \textsc{Cmax} as is would fail at completing the task
+in a reasonable amount of time. In addition, the hyperparameter
+$\delta$ describing the radius of hypersphere needs to be
+tuned carefully for each domain which is a limitation of \textsc{Cmax}.
+
+To summarize, we present \textsc{Cmax} for interleaving planning
+and execution using inaccurate models that does not require updating
+the dynamics of the model, and still provably completes the task. We
+propose practical algorithms for both small and large state spaces,
+and deploy them successfully in real world robot tasks showing its broad
+applicability. In simulation, we 
+analyze \textsc{Cmax} and show that it outperforms baselines that
+update dynamics online. Future directions include establishing
+similar guarantees like Theorem~\ref{thm:large-state-spaces} in the
+approximate planning setting, and relaxing
+Assumptions~\ref{assumption:core}, \ref{assumption:core-large} so that
+\textsc{Cmax} is applicable to a wider range of robotic tasks.
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: "../main"
+%%% End:

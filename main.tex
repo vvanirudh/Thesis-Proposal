@@ -22,18 +22,24 @@
 \Year{2020}
 %\trnumber{CMU-CS-19-109}
 
-\committee{  
-  \begin{tabular}{rl}
-    & \\
-Maxim Likhachev, Co-Chair & \\
-J. Andrew Bagnell, Co-Chair & 
-\end{tabular}
+\committee{
+  Maxim Likhachev, Co-Chair \\
+  J. Andrew Bagnell, Co-Chair \\
+  Oliver Kroemer \\
+  Leslie Pack Kaelbling (MIT)
+%   \begin{tabular}{cc}
+%     & \\
+% Maxim Likhachev, Co-Chair & CMU\\
+% J. Andrew Bagnell, Co-Chair & CMU\\
+%     Oliver Kroemer & CMU \\
+%     Leslie Pack Kaelbling & MIT
+% \end{tabular}
 }
 
 \support{}
 \disclaimer{}
 
-\keywords{}
+\keywords{Planning, Reinforcement Learning, Manipulation, Optimization}
 
 \maketitle
 
@@ -71,7 +77,7 @@ learn dynamics.
 This thesis argues that by updating the behavior of the planner and
 not the dynamics of the model, we can
 leverage simplified and potentially inaccurate models to
-significantly reduce the amount of real-world experience needed to
+significantly reduce the amount of real-world experience needed, to
 provably guarantee that the robot completes the task.
 
 In completed work, we proposed two approaches in support of this
@@ -96,16 +102,16 @@ using inaccurate models.
 For the remainder of the thesis, we propose to combine the advantages
 of existing methods that update the dynamics of the model and our
 methods that update the behavior of the
-planner to guarantee task completeness. The goal is to create a unified
-framework where the agent, during the course of its execution,
+planner. The goal is to create a unified
+framework where the robot, during the course of its execution,
 intelligently switches between (a) learning the true dynamics, (b)
 learning a model-free value estimate, or (c)
 biasing the planner away from an inaccurately modeled
-transition to guarantee that the robot completes the task while reducing
+transition to guarantee task completeness while reducing
 the amount of real-world experience required. Additionally, we also
 want to explore this unified framework in the episodic setting, where
 the robot has access to resets, and in settings where the dynamics are
-nondeterministic. 
+nondeterministic.
 \end{abstract}
 
 % \newgeometry{left=0.5in,right=0.5in,top=1in,bottom=1.4in}
@@ -123,6 +129,14 @@ nondeterministic.
 \listofalgorithms
 
 \mainmatter
+
+\input{chapters/introduction}
+\input{chapters/background}
+\input{chapters/related-work}
+\input{chapters/aistats19}
+\input{chapters/cmax}
+\input{chapters/cmaxpp}
+\input{chapters/proposed-work}
 
 \chapter*{Bibliography}
 \addcontentsline{toc}{chapter}{Bibliography}

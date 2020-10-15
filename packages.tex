@@ -4,7 +4,7 @@ plainpages=false,pdfpagelabels,bookmarks,bookmarksnumbered,%
 ]{hyperref}
 
 \usepackage[style=alphabetic,natbib=true,backend=biber,maxnames=10]{biblatex}
-\bibliography{refs.bib}
+\bibliography{ref.bib}
 
 \usepackage{totcount}
 \newtotcounter{citenum}
@@ -55,7 +55,7 @@ letterpaper,twoside,vscale=.8,hscale=.75,nomarginpar,hmarginratio=1:1
 ]{geometry}
 
 \usepackage{graphicx} % more modern
-\usepackage{subfigure}
+%\usepackage{subfigure}
 
 \usepackage{todonotes}
 \newcommand{\todon}[1]{\todo[color=red!40,inline,size=\small]{TODO: #1}}
@@ -74,11 +74,12 @@ letterpaper,twoside,vscale=.8,hscale=.75,nomarginpar,hmarginratio=1:1
 
 \usepackage{wrapfig}
 
-\newtheorem{proposition}{Proposition}
-\newtheorem{assumption}{Assumption}
-\newtheorem{theorem}{Theorem}
-\newtheorem{corollary}{Corollary}
-\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}{Proposition}[section]
+\newtheorem{assumption}{Assumption}[section]
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{corollary}{Corollary}[section]
+\newtheorem{lemma}{Lemma}[section]
+\newtheorem{definition}{Definition}[section]
 
 % \MakeRobust{\Call}
 \newcommand*\Let[2]{\State #1 $\gets$ #2}
@@ -97,7 +98,8 @@ letterpaper,twoside,vscale=.8,hscale=.75,nomarginpar,hmarginratio=1:1
 
 \usepackage{algorithm}
 \usepackage{algorithmicx}
-\usepackage{algpseudocode}
+\usepackage[noend]{algpseudocode}
+%\usepackage{algorithmic}
 \algnewcommand{\LeftComment}[1]{\Statex \(\triangleright\) #1}
 
 \newcounter{module}
@@ -113,6 +115,7 @@ letterpaper,twoside,vscale=.8,hscale=.75,nomarginpar,hmarginratio=1:1
 \usepackage{booktabs}
 
 \usepackage{caption}
+\usepackage{subcaption}
 
 \usepackage{listings,textcomp,color}
 \definecolor{backcolour}{rgb}{0.95,0.95,0.92}
@@ -147,6 +150,9 @@ letterpaper,twoside,vscale=.8,hscale=.75,nomarginpar,hmarginratio=1:1
 \usepackage{xspace}
 
 \usepackage{framed}
+
+%\usepackage[sc]{titlesec}
+
 
 %%% Local Variables:
 %%% mode: latex
