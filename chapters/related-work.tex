@@ -2,6 +2,81 @@
 \chapter{Related Work}
 \label{cha:related-work}
 
+\epigraph{\textit{If I have seen further it is by standing on the
+    shoulders of Giants.}}{Isaac Newton (1676)}
+
+This chapter presents existing literature that is relevant
+to the research problems tackled in this
+thesis. Section~\ref{sec:expl-model-free} outlines past work in
+model-free reinforcement learning that introduced different
+exploration techniques. Prior works on real-time heuristic search
+methods, that are extensively used 
+in this thesis, are presented in
+Section~\ref{sec:real-time-heuristic}. Local function approximation
+techniques have been very successful in robotics and some example
+works are introduced in
+Section~\ref{sec:local-funct-appr}. Section~\ref{sec:model-based-reinf}
+outlines existing literature on model-based reinforcement learning
+methods which combine learning dynamical models online with model-based
+planning using the learned models.
+Very recent works that have proposed approaches integrating
+model-free learning with model-based planning are highlighted in
+Section~\ref{sec:integr-model-free}. Finally,
+Section~\ref{sec:using-inacc-models} presents prior work in
+reinforcement learning and planning communities that utilize
+inaccurate models to reduce the amount of real-world experience
+required to compute a successful plan or an optimal policy. In all
+these domains, the amount of literature is immense so the focus in
+this chapter is on relevance to this thesis rather than an exhaustive list.
+
+\section{Exploration in Model-Free RL}
+\label{sec:expl-model-free}
+
+% Mention greedy approaches - estimate model and then exploit it fully
+% Why exploration is really needed
+% Mention that in model-based learning, we can do more intelligent
+% exploration such as E3 and RMAX
+% But in model-free, broadly two categories
+
+\subsection{Exploration in Action Space}
+\label{sec:expl-acti-space}
+
+\subsection{Exploration in Policy Space}
+\label{sec:expl-policy-space}
+
+
+\section{Real-time Heuristic Search}
+\label{sec:real-time-heuristic}
+
+% LRTA*, RTAA*, RTDP, vadim bulitko's paper
+% weighted real-time heuristic search
+
+\section{Local Function Approximation Methods}
+\label{sec:local-funct-appr}
+
+% CHris Atkeson's papers, LWR, LWPR
+% Inverse dynamics learning papers from Schaal 
+
+\section{Model-based RL with Provable Guarantees}
+\label{sec:model-based-reinf}
+
+% E3, RMAX, MBIE, C-PACE, Adaptive resolution, Sham's thesis,
+% 
+
+\section{Integrating Model-Free and Model-Based Learning}
+\label{sec:integr-model-free}
+
+% CMAX++ references (Lagrassa , Lee papers and their references),
+% Not so much work
+
+\section{Using Inaccurate Models in Planning and Execution}
+\label{sec:using-inacc-models}
+
+% Abbeel paper, ILC, PAC RL Jiang paper, Dale McConcachie, Offline RL,
+% Residual Model learning papers
+
+
+
 
 %%% Local Variables:
 %%% mode: latex
