@@ -6,6 +6,8 @@
     question is how wrong do they have to be to not be
     useful.}}{George Box (1987)}
 
+\section{Motivation}
+\label{sec:motivation}
 
 Robotic planning algorithms have been widely successful in computing
 feasible and optimal plans, or sequence of decisions, for tasks
@@ -197,7 +199,7 @@ behavior of the planner and do not require any updates to the dynamics
 of the inaccurate model used for planning.  Both methods come with
 provable guarantees on completing the task under assumptions on the
 accuracy of the model. In addition to these methods, we also emphasize
-the importance of using simplified and inaccurate models for planning
+the importance of using model-based planning
 by analyzing the sample complexity (or the amount of experience
 needed) of exploration techniques used in model-free RL methods. Our
 analysis shows that undirected global exploration techniques popularly
@@ -433,7 +435,10 @@ searching forward from the current state of the agent. Most
 importantly, real-time heuristic search methods can satisfy hard
 real-time requirements in large state spaces since the sizes of their
 local search spaces are independent of the sizes
-of the state spaces and can thus remain small. 
+of the state spaces and can thus remain small.
+
+\subsubsection{LRTA*}
+\label{sec:lrta}
 
 In this thesis, we will focus on Learning real-time A* (LRTA*) real-time search methods
 that are real-time search methods that associate information with the
@@ -487,6 +492,9 @@ to the traditional definitions of admissible and consistent heuristic
 values for A* search. Note that zero-initialized value estimates are
 both admissible and consistent.
 
+\subsubsection{RTAA*}
+\label{sec:rtaa}
+
 Real-time Adaptive A* (RTAA*) proposed
 in~\cite{DBLP:conf/atal/KoenigL06} is similar to LRTA*
 (Algorithm~\ref{alg:rtaa}). They only 
@@ -506,7 +514,7 @@ equations for all expanded states $s$:
 \end{equation}
 
 \begin{algorithm}[t]
-  \caption{RTAA* with lookahead $K \geq 1$}
+  \caption{RTAA* with lookahead $K \geq 1$~\cite{DBLP:conf/atal/KoenigL06}}
   \begin{algorithmic}[1]
     \State $s \leftarrow s_0$
     \While{$s \notin \goalspace$}
@@ -557,6 +565,128 @@ executed fast and there is a very strict time limit per search episode.
 \subsection{Local Function Approximation Methods}
 \label{sec:local-funct-appr-1}
 
+The goal of function approximation methods is to capture the
+underlying relationship between input and output data. A typical
+approach is to use all the training data to fit a global model that
+predicts the output given the input throughout the input space. The
+hope is that this approximation predicts output values that are close to the
+true output values of the original function. A major disadvantage of
+these global function approximation methods is that in many cases,
+there exists no parameter values that provide a sufficiently good
+approximation. Moving to a larger function approximation class with
+more parameters requires a significantly larger training data which
+might not be available. Furthermore, in cases where the model needs to
+be updated incrementally, the computational cost of recomputing the
+global function approximation is very high and potentially infeasible
+on real-time systems.
+
+An alternative to global function approximation methods are local
+function approximation methods such as Locally Weighted Learning
+(LWL)~\cite{DBLP:journals/air/AtkesonMS97a,
+  DBLP:journals/air/AtkesonMS97}. LWL methods are 
+non-parametric and prediction is computed using local functions which
+use only a subset of the training data. The basic idea of LWL is for
+each query point, a local model is constructed based on
+neighboring training data. Each data point is associated with a
+weighting factor that captures the influence of the data point in
+computing the prediction for the query point. Intuitively, the closer
+the data point to the query point the higher its influence. Since the
+training data is directly used during prediction and there is no
+pre-processing before prediction, LWL can be a very accurate and fast
+incremental function approximation method.
+
+For ease of exposition, let us consider the following regression
+model
+\begin{equation}
+  \label{eq:12}
+  y = f(\xbold) + \epsilon
+\end{equation}
+
+where $f(\xbold)$ is the unknown function that we are seeking to
+approximate, $\xbold \in \mathbb{R}^d$, $y \in \mathbb{R}$ and
+$\epsilon$ is zero mean noise. Given a dataset
+$\buffer = \{(\xbold_i, y_i)\}_{i=1}^N$ and a query point $\xbold_q$ we can define
+the following cost function,
+\begin{equation}
+  \label{eq:13}
+  J(\beta_q) = \frac{1}{N}\sum_{i=1}^N w_i(\xbold_q)(y_i - \betabold_q^T\xbold_i)^2
+\end{equation}
+where $w_i$ are weights that capture the influence of the $i$-th data
+point $(\xbold_i, y_i)$ on the prediction for query point $\xbold_q$, and
+$\betabold_q$ is the coefficients for our linear model that is used for
+prediction. The goal is to find $\betabold_q$ that minimizes the above
+cost function and predict $\hat{y}_q = \betabold_q^T\xbold_q$ (Assume
+that $\xbold_i, \xbold_q$ vectors have a $1$ added to account for the
+offset term.) The weights $w_i(\xbold_q)$ are computed typically using
+a distance metric $d(\xbold_i, \xbold_q)$ that captures relevance of
+training points to the query point, and a kernel function $K(d)$ which
+computes the weight given a distance value.
+
+\subsubsection{K-Nearest Neighbor Regression}
+\label{sec:k-nearest-neighbor}
+
+A very simple LWL method is K-Nearest Neighbor (KNN) regression which
+given a query point $\xbold_q$ finds the $K$ nearest neighbors in the
+training data $\buffer$ using a distance metric $d(\xbold_q,
+\xbold_i)$. There are several variants of this method, one of which
+uniformly weights all the $K$ nearest neighbor's outputs to obtain the
+prediction for the query point, i.e.
+\begin{equation}
+  \label{eq:14}
+  \hat{y}_q = \frac{1}{K} \sum_{\xbold_i \in \buffer_K(\xbold_q)} y_i
+\end{equation}
+where $\buffer_K(\xbold_q)$ represents the set of size $K$ consisting
+of the $K$ nearest neighbors of the query point $\xbold_q$ in
+$\buffer$. Another variant, which often works well in practice, is to
+weigh each neighbor by the inverse of their distance to the query
+point. Intuitively, closer neighbors have a greater influence than
+farther neighbors. Thus, we have
+\begin{equation}
+  \label{eq:15}
+  \hat{y}_q = \frac{\sum_{\xbold_i \in \buffer_K(\xbold_q)} w_iy_i}{\sum_{\xbold_i \in \buffer_K(\xbold_q)} w_i}
+\end{equation}
+where the weight $w_i = \frac{1}{d(\xbold_q, \xbold_i)}$ is the
+inverse of distance to the query point. KNN regression requires
+storing all the training data in memory in the form of K-d trees which
+allow very fast computation of $K$ nearest neighbors.
+
+\subsubsection{Locally Weighted Regression}
+\label{sec:locally-weight-regr}
+
+Locally weighted regression (LWR) is a locally weighted learning
+method that maintains all the training data in memory and quickly
+computes the prediction for any given query point. LWR is presented in
+Algorithm~\ref{alg:lwr} which is executed once for each query point
+$x_q$. There are also simple extensions to the batch setting where we
+want to obtain predictions for a batch of query points. The only
+hyperparameter is the matrix $D$ which is usually set to a scaled
+identity matrix $D = h\mathbb{I}$ where $h$ is a scalar hyperparameter
+that is chosen using cross validation. LWR typically has a very high
+approximation accuracy due to its local nature and has only few
+hyperparameters. The disadvantage is that Algorithm~\ref{alg:lwr} has
+a computational complexity of $\mathcal{O}(N^2)$ where $N$ is the size
+of training data, which can be very expensive for large
+datasets. Furthermore, LWR requires you to store all the training data
+in memory which might be infeasible for extremely large datasets.
+
+\begin{algorithm}[t]
+  \caption{Locally Weighted Regression}
+  \begin{algorithmic}[1]
+    \State \textbf{Input:} Training data $\buffer = \{(\xbold_i,
+    y_i)\}_{i=1}^N$, Query point $\xbold_q$
+    \State Construct matrix $X$ with rows corresponding to $\hat{\xbold}_i$
+    where $\hat{\xbold}_i = [\xbold_i^T 1]^T$
+    \State Construct vector $\ybold$ with each element corresponding
+    to $y_i$
+    \State Compute diagonal weight matrix $W$ where the $i$-th
+    diagonal element is given by $\exp\left( -\frac{1}{2} (\xbold_i -
+      \xbold_q)^TD(\xbold_i - \xbold_q) \right)$
+    \State Compute $\beta_q = (X^TWX)^{-1}X^TW\ybold$
+    \State Compute prediction $\hat{y}_q = \beta_q^T\hat{\xbold_q}$
+    where $\hat{\xbold_q} = [\xbold_q^T 1]^T$
+  \end{algorithmic}
+  \label{alg:lwr}
+\end{algorithm}
 
 
 %%% Local Variables:
