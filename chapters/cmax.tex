@@ -8,6 +8,20 @@
     (rather than anti-clockwise) to correct for this error.}}{Pieter
   Abbeel, Morgan Quigley, Andrew Ng (2006)}
 
+
+This chapter presents our first algorithmic contribution in this
+thesis. The algorithm presented is in the spirit of this thesis which
+advocates using online experience to adapt the behavior of the planner
+rather than updating the dynamics of the model. The algorithm
+perfectly captures the intuition that figuring out something is
+wrong is much easier than knowing how to fix it. While the idea behind
+the proposed algorithm is quite simple, the guarantees provided are
+non-trivial and it works very well in practice. This algorithm is the
+first approach in literature to interleave planning and execution using inaccurate
+dynamical model,
+with provable guarantees on completing the task without requiring any
+updates to the dynamics of the model.
+
 \section{Introduction}
 \label{sec:introduction}
 
@@ -1699,11 +1713,12 @@ propose practical algorithms for both small and large state spaces,
 and deploy them successfully in real world robot tasks showing its broad
 applicability. In simulation, we 
 analyze \textsc{Cmax} and show that it outperforms baselines that
-update dynamics online. Future directions include establishing
-similar guarantees like Theorem~\ref{thm:large-state-spaces} in the
-approximate planning setting, and relaxing
-Assumptions~\ref{assumption:core}, \ref{assumption:core-large} so that
-\textsc{Cmax} is applicable to a wider range of robotic tasks.
+update dynamics online.
+% Future directions include establishing
+% similar guarantees like Theorem~\ref{thm:large-state-spaces} in the
+% approximate planning setting, and relaxing
+% Assumptions~\ref{assumption:core}, \ref{assumption:core-large} so that
+% \textsc{Cmax} is applicable to a wider range of robotic tasks.
 
 %%% Local Variables:
 %%% mode: latex

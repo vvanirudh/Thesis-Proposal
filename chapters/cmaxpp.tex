@@ -9,6 +9,21 @@ be capable of learning and improving their performance with
 every execution of these repetitive tasks.}}{Mike Phillips, Ben Cohen,
 Sachin Chitta, Max Likhachev (2012)}
 
+While \cmax{}, presented in Chapter~\ref{cha:plann-exec}, guaranteed
+task completeness using inaccurate models, it required strong
+assumptions on the accuracy of the model. Furthermore, in a repetitive
+task where the robot is required to complete the same task over
+several repetitions, \cmax{} fails to improve the solution quality and
+in some cases, fails to complete the task in later repetitions. This
+chapter presents an algorithm that avoids this behavior by leveraging
+the online experience to improve quality of solution across
+repetitions while retaining task completeness guarantee in each
+repetition. These guarantees require a milder assumption on the
+accuracy of the model which is easier to satisfy when compared to the
+assumption required by \cmax{}. However, like \cmax{}, the proposed
+algorithm does not require any updates to the dynamics of the model
+and only adapts the behavior of the planner in the spirit of this thesis.
+
 \section{Introduction}
 \label{sec:introduction}
 
@@ -1128,7 +1143,7 @@ repetitions, sometimes even having better performance than \cmax{} and
 
 
 
-\section{Discussion and Future Work}
+\section{Discussion}
 \label{sec:disc-concl}
 
 A major advantage of \cmaxpp{} is that, unlike previous approaches
@@ -1164,11 +1179,11 @@ without resorting to global undirected exploration
 techniques~\cite{Thrun-1992-15850}, which are highly sample
 inefficient, to ensure completeness.
 
-An interesting future direction is to interleave model identification
-with \cmaxpp{} to combine the best of approaches that learn the true
-dynamics and \cmaxpp{}. For instance, given a set of plausible forward
-models we seek to quickly identify the best model while ensuring efficient
-performance in each repetition.
+% An interesting future direction is to interleave model identification
+% with \cmaxpp{} to combine the best of approaches that learn the true
+% dynamics and \cmaxpp{}. For instance, given a set of plausible forward
+% models we seek to quickly identify the best model while ensuring efficient
+% performance in each repetition.
 
 %%% Local Variables:
 %%% mode: latex

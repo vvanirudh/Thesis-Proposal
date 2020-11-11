@@ -3,7 +3,21 @@
 \label{cha:sample-compl-expl}
 
 \epigraph{\textit{\ldots much of the benefit of policy search is achieved
-by black-box methods.}}{Jens Kober, Drew Bagnell and Jan Peters (2013)}
+by black-box methods.}}{Jens Kober, Drew Bagnell and Jan Peters
+(2013)}
+
+In this chapter, we will analyze the sample complexity of exploration
+techniques that are popularly used in model-free reinforcement
+learning methods. More specifically, we will contrast the number of
+samples required to obtain an $\epsilon$-suboptimal policy between
+methods that explore in policy space versus those that explore in
+action space. Our goal in this chapter is to understand the
+inherent trade-off between these two exploration techniques and to get
+a better grasp of when one works better than the other, in terms of
+sample complexity. This chapter also motivates the general theme of
+this thesis that dynamical models, despite being potentially
+inaccurate, are extremely useful sources of domain knowledge, and the
+price to pay for using model-free approaches can be steep.
 
 \section{Introduction}
 Model-free policy search is a general approach to learn parameterized

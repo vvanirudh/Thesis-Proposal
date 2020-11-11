@@ -1,6 +1,215 @@
 \chapter{Proposed Work}
 \label{cha:proposed-work}
 
+\epigraph{\textit{More work is needed before planning with learned
+    models can be effective. Environment models should be
+    constructed judiciously with regard to both their states and
+    dynamics with the goal of optimizing the planning process.}}{Rich
+  Sutton and Andrew Barto (2020)}
+
+The algorithms presented in this thesis, so
+far, have not required any updates to the dynamics of the model. In
+contrast, most existing methods in the literature, such
+as~\cite{DBLP:journals/ml/KearnsS02, DBLP:journals/jmlr/BrafmanT02,
+  DBLP:conf/atal/JongS07, 
+  DBLP:journals/pami/DeisenrothFR15, DBLP:conf/icml/AbbeelQN06, 
+  DBLP:conf/aaai/Jiang18, rastogi2018sample}, use experience
+acquired from executions to update the dynamics of the model. In
+chapters~\ref{cha:plann-exec} and~\ref{cha:lever-exper}, we have
+argued that updating the dynamics of the model requires a large amount
+of experience in large state spaces and can be at the expense of
+completing the task. While this is generally true, there are major
+advantages of updating the dynamics of the model in domains where it
+is feasible to do it online as it allows the planner to compute
+solutions that exploit the true dynamics and potentially result in
+solutions with very low costs. Furthermore even in application domains
+where we require a large amount of experience to update the model,
+the improvement in task performance from planning on a more accurate
+model can outweigh the executions wasted to learn true dynamics. For
+example, there might be regions in the state space where updating the
+dynamics of the model can be done efficiently while in other regions
+we can resort to methods that update the behavior of planner such as
+\cmax{} and \cmaxpp{}. This motivates a trade-off between both styles
+of methods and understanding this trade-off can result in intelligent
+use of online experience to achieve efficient planning and execution.
+
+
+In the remainder of this thesis, we aim to combine the advantages of
+existing methods that update the dynamics of the model, and methods
+presented in this thesis that update the behavior of the planner, like
+\cmax{} and \cmaxpp{}. The goal is to create a unified framework where
+the robot, during the course of its execution, deals with the
+inaccuracy in the dynamical model and completes the task by
+intelligently switching between: 
+\begin{enumerate}
+\item Learning the true dynamics and updating the model
+\item Learning a model-free estimate of the value function for
+  inaccurately modeled transitions
+\item Biasing the planner away from inaccurately modeled transitions
+  by inflating their cost
+\end{enumerate}
+
+In the next few sections, we outline the challenges in creating such a
+unified framework and present initial ideas that are promising to
+explore. 
+
+\section{Updating Dynamical Model Online}
+\label{sec:updat-dynam-model}
+
+In the purely online no-reset setting considered in this thesis, there
+are several challenges that arise for methods that seek to update the
+dynamics of the model online.
+
+\subsection{Local Modeling}
+\label{sec:local-modeling}
+
+Foremost among them is data efficiency. In the online setting, the
+robot acquires training data for learning the true dynamics through
+executions. To learn a good approximation of the true dynamics, we
+require a large number of samples especially in high-dimensional state
+spaces. On the other hand, the robot's goal is to complete the task
+quickly without wasting executions. Thus, the objective of learning
+true dynamics can be in conflict with the objective of completing the
+task resulting in a trade-off.
+
+Most existing works in the model-based
+reinforcement learning literature use a global function
+approximator to learn the true dynamics from scratch. However, as
+evidenced by our experiments in Chapters~\ref{cha:plann-exec}
+and~\ref{cha:lever-exper}, global function approximators such as
+neural networks require a large amount of executions before they can
+approximate the true dynamics well enough to complete the task. In
+contrast, local function approximation methods such as the ones
+described in Section~\ref{sec:local-funct-appr-1} operate well in the
+regime of less data, better approximate the dynamics, and are more
+amenable to incremental online implementations. Classical works such as
+LWR~\cite{DBLP:journals/air/AtkesonMS97},
+LWPR~\cite{DBLP:conf/icml/VijayakumarS00} and more recent works such
+as LGR~\cite{DBLP:journals/corr/MeierHS14} and incremental
+LGR~\cite{DBLP:conf/nips/MeierHS14} have shown empirical success in
+learning inverse dynamics online for torque
+control. The success of these local modeling methods motivates us to
+use similar methods in learning forward dynamics online. Our
+experiments in Chapters~\ref{cha:plann-exec} and~\ref{cha:lever-exper}
+using the model KNN baseline, which is a local modeling method, have
+provided early indications to the efficacy of these local modeling
+methods.
+
+\subsection{Task-Driven Model Learning}
+\label{sec:task-driven-learning}
+
+A general approach to estimate the true dynamics is to frame it as a
+regression problem where the loss function is typically the L$2$ norm
+prediction error. For example, given a state $s \in \statespace
+\subset \mathbb{R}^d$
+and action $a \in \actionspace$,
+if the true successor is $s' \in \statespace$ and the function
+approximator class is parameterized by $\theta$ then the objective is
+to minimize the following loss function
+\begin{equation}
+  \label{eq:16}
+  \mathcal{L}(\theta) = \|s' - \hat{f}(s, a; \theta)\|_2^2
+\end{equation}
+where $\hat{f}$ is the function approximator. In stochastic dynamics
+setting, a popular way to estimate the stochastic transition matrix is
+to use maximum likelihood estimation (MLE.)
+
+The common practice in model-based reinforcement learning is to
+seperate the task of learning the dynamical model from its use in
+planning. One can argue that the goal of learning the model is not in
+optimizing prediction error as given in \eqref{eq:16}, but to learn
+models that are directly useful for planning. It might be the case
+that some aspects of the environment dynamics are irrelevant to find a
+good plan. Thus, it is desirable to have a model learning procedure
+that takes the planning problem into account and is more
+task-driven.
+
+Furthermore in real world domains it is often the case
+that the function approximator class used is unable to capture the
+true dynamics, either due to a small function class or the true
+dynamics being extremely complex. In such cases, even with unlimited
+amount of experience and computation, there is no guarantee that the
+model with the least prediction error leads to a plan that completes
+the task successfully. This motivates moving away from using
+prediction error as the model selection metric to using a
+task-specific metric that selects a model which results in plans that
+complete the task.
+
+Recent work such as~\cite{DBLP:conf/aistats/FarahmandBN17,
+  Farahmand2018} have explored designing loss functions for model
+learning that result in models which are useful for their subsequent
+use in value-based planning. This line of work has been taken further
+by~\cite{grimm2020value} establishing the value equivalence principle
+which states that two models are equivalent with respect to a set of
+function class if they yield the same Bellman updates. They illustrate
+that by leveraging the value equivalence principle one may find
+simpler models without compromising task performance, saving both
+computation and memory. Another very relevant
+work~\cite{DBLP:conf/icra/JosephGRHR13} presents a simple algorithm
+that selects the model which achieves the highest expected reward, and
+not the lowest prediction error. The algorithm guarantees that the
+highest performing model from the function approximator class can be
+found given unlimited data and computation.
+
+In our online no-reset setting, it is extremely important to use the
+limited data available to optimize for task completion rather than
+minimizing prediction error. A naive way to achieve this is to
+consider a weighted prediction error loss function that weights each
+transition according to the usefulness of it for future replanning
+queries. This enables us to build better models with less data and
+without compromising task performance.
+
+\subsection{Guaranteeting Task Completeness}
+\label{sec:guar-task-compl}
+
+During the process of updating the dynamics of the model, the
+resulting model can have approximation errors that result in violating
+assumptions required to guarantee task completeness. Most of the prior
+works present such guarantees under an idealistic assumption of no
+approximation errors which cannot be realized in practice. In our
+proposed algorithm, we would like to retain the task completeness
+guarantees despite the presence of approximation errors in the updated
+dynamical model.
+
+\section{Switching Between Updating Dynamical Model and Updating
+  Planner Behavior}
+\label{sec:switch-betw-cmax}
+
+To achieve our goal of combining advantages of methods that update the
+dynamical mdoel online and methods that update the behavior of the
+planner, we need an intelligent strategy to switch between these
+methods during execution. An example of a switching strategy has
+been presented in Section~\ref{sec:adaptive} where we presented an
+algorithm that switches between \cmax{} and \cmaxpp{}. The goal is to
+design a similar algorithm that switches between updating the model,
+\cmax{} and \cmaxpp{}, with the objective of optimizing task
+performance.
+
+\section{Schedule of Proposed Work}
+\label{sec:sched-prop-work}
+
+\begin{itemize}
+\item \textbf{Spring 2021}
+  \begin{itemize}
+  \item Formulate a task-aware loss function for training local residual
+    dynamical models
+  \item Design an online incremental algorithm to update dynamics of
+    the model and complete the task
+  \end{itemize}
+\item \textbf{Summer 2021}
+  \begin{itemize}
+  \item Create a unified framework where the robot, during execution,
+    switches between updating dynamics, learning model-free Q-value
+    estimates, and biasing planner away from inaccurately modeled
+    transitions
+  \item Demonstrate the framework on simulated and real robot
+    applications where we have access to an inaccurate dynamical model
+  \end{itemize}
+\item \textbf{Fall 2021}
+  \begin{itemize}
+  \item Write and defend thesis
+  \end{itemize}
+\end{itemize}
 
 %%% Local Variables:
 %%% mode: latex
